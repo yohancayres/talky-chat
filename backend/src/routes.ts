@@ -19,6 +19,7 @@ import {
   getMessages,
   getUserActivity,
   hasPendingReply,
+  listCharacters,
   saveCharacter,
   saveConversation,
 } from './store';
@@ -42,12 +43,30 @@ function characterMessage(
   };
 }
 
-// Cria um personagem novo, abre uma conversa e gera a mensagem de boas-vindas.
+// Conecta o usuário a um personagem (existente no pool global ou novo), abre uma
+// conversa e gera a mensagem de boas-vindas.
 router.post('/characters/generate', async (req, res) => {
   try {
     const { hint, userName } = req.body ?? {};
-    const character = await generateCharacter(hint, userName);
-    saveCharacter(character);
+
+    // Personagens são globais e compartilhados. Com certa probabilidade, o
+    // usuário "esbarra" em um personagem que já existe no Talky.
+    const pool = listCharacters();
+    const hasHint = typeof hint === 'string' && hint.trim().length > 0;
+    const reuseChance = hasHint
+      ? config.character.poolReuseChance * 0.3 // com pedido específico, tende a criar
+      : config.character.poolReuseChance;
+    const reuse = pool.length > 0 && Math.random() < reuseChance;
+
+    let character: Character;
+    let existing = false;
+    if (reuse) {
+      character = pool[Math.floor(Math.random() * pool.length)];
+      existing = true;
+    } else {
+      character = await generateCharacter(hint, userName);
+      saveCharacter(character);
+    }
 
     const conversation: Conversation = {
       id: randomUUID(),
@@ -67,7 +86,7 @@ router.post('/characters/generate', async (req, res) => {
     const introMessage = characterMessage(conversation.id, character, introText);
     addMessage(introMessage);
 
-    res.json({ conversation, character, messages: [introMessage] });
+    res.json({ conversation, character, messages: [introMessage], existing });
   } catch (err) {
     console.error('[talky] erro ao gerar personagem:', err);
     res.status(500).json({ error: messageOf(err) });

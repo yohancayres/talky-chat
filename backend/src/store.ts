@@ -57,6 +57,11 @@ export function getCharacter(id: string): Character | undefined {
   return db.characters[id];
 }
 
+/** Todos os personagens (pool global compartilhado entre usuários). */
+export function listCharacters(): Character[] {
+  return Object.values(db.characters);
+}
+
 export function saveConversation(conversation: Conversation): void {
   db.conversations[conversation.id] = conversation;
   persist();

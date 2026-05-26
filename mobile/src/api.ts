@@ -26,6 +26,8 @@ export interface GenerateResponse {
   conversation: Conversation;
   character: Character;
   messages: Message[];
+  /** true = o usuário "encontrou" um personagem já existente no pool global. */
+  existing?: boolean;
 }
 
 export interface ConversationResponse {

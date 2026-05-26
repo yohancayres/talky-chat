@@ -4,6 +4,7 @@ import { anthropic } from './anthropicClient';
 import { config } from './config';
 import {
   CHARACTER_GEN_SYSTEM,
+  TEMPERAMENT_KEYS,
   buildCharacterUserPrompt,
   buildChatSystemPrompt,
   buildNewsDirective,
@@ -89,6 +90,7 @@ export async function generateCharacter(
     : [];
 
   const schedule = normalizeSchedule(data.schedule);
+  const temperament = normalizeTemperament(data.temperament);
 
   return {
     id: randomUUID(),
@@ -111,9 +113,21 @@ export async function generateCharacter(
     backstory: String(data.backstory ?? ''),
     routine: String(data.routine ?? ''),
     timeline,
+    temperament,
     schedule,
     createdAt: new Date().toISOString(),
   };
+}
+
+function normalizeTemperament(value: unknown): Record<string, number> {
+  const data = (value ?? {}) as Record<string, unknown>;
+  const result: Record<string, number> = {};
+  for (const key of TEMPERAMENT_KEYS) {
+    const n = Math.round(Number(data[key]));
+    // Faltando? valor variado para não cair tudo no meio.
+    result[key] = Number.isFinite(n) ? Math.min(Math.max(n, 0), 10) : 2 + Math.floor(Math.random() * 5);
+  }
+  return result;
 }
 
 const VALID_RESPONSIVENESS: Responsiveness[] = ['fast', 'slow', 'away', 'asleep'];

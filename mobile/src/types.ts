@@ -24,6 +24,7 @@ export interface Character {
   backstory: string;
   routine: string;
   timeline: TimelineEvent[];
+  temperament?: Record<string, number>;
   createdAt: string;
 }
 

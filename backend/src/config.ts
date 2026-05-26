@@ -43,6 +43,11 @@ export const config = {
     // Teto do atraso quando o personagem está acordado (minutos).
     maxAwakeMinutes: Number(process.env.REPLY_MAX_AWAKE_MINUTES ?? 30),
   },
+  character: {
+    // Personagens são GLOBAIS: ao entrar, há esta chance (0-1) de o usuário ser
+    // conectado a um personagem que já existe no Talky em vez de criar um novo.
+    poolReuseChance: Number(process.env.CHARACTER_POOL_REUSE_CHANCE ?? 0.5),
+  },
 };
 
 if (!config.anthropicApiKey) {

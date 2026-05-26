@@ -10,12 +10,50 @@ import {
 import { colors, radius } from '../theme';
 import { Character } from '../types';
 
+const TEMPERAMENT_LABELS: Record<string, string> = {
+  ironia: 'Ironia',
+  sarcasmo: 'Sarcasmo',
+  passivo_agressivo: 'Passivo-agressivo',
+  docura: 'Doçura',
+  brutalidade: 'Brutalidade',
+  implicancia: 'Implicância',
+  sonhador: 'Sonhador',
+  realismo: 'Realismo',
+  ceticismo: 'Ceticismo',
+  nerdice: 'Nerdice',
+  humor: 'Humor',
+  otimismo: 'Otimismo',
+  paciencia: 'Paciência',
+  formalidade: 'Formalidade',
+  extroversao: 'Extroversão',
+  carinho: 'Carinho',
+  teimosia: 'Teimosia',
+};
+
 function Chips({ items }: { items: string[] }) {
   return (
     <View style={styles.chips}>
       {items.map((item, i) => (
         <View key={`${item}-${i}`} style={styles.chip}>
           <Text style={styles.chipText}>{item}</Text>
+        </View>
+      ))}
+    </View>
+  );
+}
+
+function TemperamentBars({ temperament }: { temperament: Record<string, number> }) {
+  const rows = Object.entries(temperament)
+    .filter(([key]) => TEMPERAMENT_LABELS[key])
+    .sort((a, b) => b[1] - a[1]);
+  return (
+    <View>
+      {rows.map(([key, value]) => (
+        <View key={key} style={styles.barRow}>
+          <Text style={styles.barLabel}>{TEMPERAMENT_LABELS[key]}</Text>
+          <View style={styles.barTrack}>
+            <View style={[styles.barFill, { width: `${Math.max(0, Math.min(10, value)) * 10}%` }]} />
+          </View>
         </View>
       ))}
     </View>
@@ -70,6 +108,12 @@ export function CharacterProfileModal({
           {character.personality.traits.length > 0 && (
             <Section title="Personalidade">
               <Chips items={character.personality.traits} />
+            </Section>
+          )}
+
+          {character.temperament && Object.keys(character.temperament).length > 0 && (
+            <Section title="Temperamento">
+              <TemperamentBars temperament={character.temperament} />
             </Section>
           )}
 
@@ -162,6 +206,16 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
   },
   chipText: { color: colors.text, fontSize: 14 },
+  barRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 9 },
+  barLabel: { width: 130, fontSize: 13, color: colors.text },
+  barTrack: {
+    flex: 1,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: colors.border,
+    overflow: 'hidden',
+  },
+  barFill: { height: 8, borderRadius: 4, backgroundColor: colors.accent },
   timelineItem: { flexDirection: 'row', marginBottom: 14 },
   timelineAge: {
     width: 76,

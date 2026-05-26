@@ -1,6 +1,59 @@
 import { Character } from './types';
 
 // ---------------------------------------------------------------------------
+// Temperamento (traços com intensidade 0-10)
+// ---------------------------------------------------------------------------
+
+interface TemperamentDimension {
+  key: string;
+  label: string;
+  high: string; // comportamento quando alto (>=7)
+  low: string; // comportamento quando baixo (<=2)
+}
+
+export const TEMPERAMENT_DIMENSIONS: TemperamentDimension[] = [
+  { key: 'ironia', label: 'Ironia', high: 'usa ironia o tempo todo', low: 'fala de forma direta, sem ironia' },
+  { key: 'sarcasmo', label: 'Sarcasmo', high: 'é bem sarcástico, solta farpas', low: 'nada sarcástico, sincero' },
+  { key: 'passivo_agressivo', label: 'Passivo-agressivo', high: 'às vezes é passivo-agressivo, alfineta de forma indireta', low: 'é direto, sem rodeios passivo-agressivos' },
+  { key: 'docura', label: 'Doçura', high: 'é doce, gentil e acolhedor', low: 'é seco, pouco caloroso' },
+  { key: 'brutalidade', label: 'Brutalidade', high: 'é bruto e ríspido no jeito de falar', low: 'é suave e cuidadoso no trato' },
+  { key: 'implicancia', label: 'Implicância', high: 'adora implicar e provocar de brincadeira', low: 'não fica implicando com ninguém' },
+  { key: 'sonhador', label: 'Sonhador', high: 'é sonhador, vive de ideias e planos', low: 'tem os pés no chão' },
+  { key: 'realismo', label: 'Realismo', high: 'é realista e pragmático', low: 'é mais idealista' },
+  { key: 'ceticismo', label: 'Ceticismo', high: 'é cético, desconfia das coisas', low: 'é crédulo e aberto a tudo' },
+  { key: 'nerdice', label: 'Nerdice', high: 'é nerd, mergulha em detalhes e assuntos específicos', low: 'não tem muita pegada nerd' },
+  { key: 'humor', label: 'Humor', high: 'é muito brincalhão e bem-humorado', low: 'é mais sério' },
+  { key: 'otimismo', label: 'Otimismo', high: 'é otimista', low: 'é pessimista, vê o lado ruim' },
+  { key: 'paciencia', label: 'Paciência', high: 'é muito paciente', low: 'é impaciente, se irrita fácil' },
+  { key: 'formalidade', label: 'Formalidade', high: 'fala de forma mais formal', low: 'fala bem informal, cheio de gírias' },
+  { key: 'extroversao', label: 'Extroversão', high: 'é extrovertido e falante', low: 'é introvertido e reservado' },
+  { key: 'carinho', label: 'Carinho', high: 'demonstra afeto abertamente', low: 'é mais distante emocionalmente' },
+  { key: 'teimosia', label: 'Teimosia', high: 'é teimoso, difícil de mudar de ideia', low: 'é flexível e aberto a mudar de ideia' },
+];
+
+export const TEMPERAMENT_KEYS = TEMPERAMENT_DIMENSIONS.map((d) => d.key);
+
+function intensityWord(value: number): string {
+  if (value <= 1) return 'praticamente nulo';
+  if (value <= 3) return 'baixo';
+  if (value <= 6) return 'médio';
+  if (value <= 8) return 'alto';
+  return 'muito alto';
+}
+
+/** Descreve só os traços marcantes (altos ou baixos) do personagem. */
+export function describeTemperament(temperament: Record<string, number>): string {
+  const lines: string[] = [];
+  for (const dim of TEMPERAMENT_DIMENSIONS) {
+    const value = temperament?.[dim.key];
+    if (typeof value !== 'number') continue;
+    if (value >= 7) lines.push(`- ${dim.label} (${intensityWord(value)}): ${dim.high}.`);
+    else if (value <= 2) lines.push(`- ${dim.label} (${intensityWord(value)}): ${dim.low}.`);
+  }
+  return lines.join('\n');
+}
+
+// ---------------------------------------------------------------------------
 // Geração de personagem
 // ---------------------------------------------------------------------------
 
@@ -34,6 +87,13 @@ Responda SOMENTE com um objeto JSON válido. Sem markdown, sem cercas de código
   "timeline": [                     // 4-6 marcos da vida, em ordem cronológica
     { "age": string, "title": string, "description": string }
   ],
+  "temperament": {                  // intensidade 0-10 de cada traço (NÚMEROS)
+    "ironia": number, "sarcasmo": number, "passivo_agressivo": number,
+    "docura": number, "brutalidade": number, "implicancia": number,
+    "sonhador": number, "realismo": number, "ceticismo": number, "nerdice": number,
+    "humor": number, "otimismo": number, "paciencia": number, "formalidade": number,
+    "extroversao": number, "carinho": number, "teimosia": number
+  },
   "schedule": [                     // 5-8 blocos cobrindo um dia típico (24h)
     {
       "startHour": number,          // 0-23
@@ -49,7 +109,12 @@ e a rotina (quem trabalha de dia fica ocupado nesse período; notívago dorme de
 dia; etc.). Use atividades variadas e específicas. Mapeie a disponibilidade:
 "fast" = livre, responde na hora; "slow" = ocupado, responde devagar; "away" =
 muito ocupado (reunião, academia, dirigindo), demora bastante; "asleep" =
-dormindo, só responde ao acordar.`;
+dormindo, só responde ao acordar.
+
+No temperament, VARIE MUITO entre personagens: alguns extremamente sarcásticos e
+irônicos, outros doces e carinhosos, outros brutos, implicantes, sonhadores,
+céticos, nerds, passivo-agressivos. Evite deixar tudo mediano — dê extremos que
+tornem o personagem marcante e único.`;
 
 export function buildCharacterUserPrompt(hint?: string, userName?: string): string {
   const parts: string[] = ['Crie um novo personagem para o Talky.'];
@@ -105,8 +170,13 @@ export function buildChatSystemPrompt(
 
   const name = userName && userName.trim() ? userName.trim() : 'a pessoa';
 
+  const temperament = describeTemperament(character.temperament ?? {});
+  const temperamentSection = temperament
+    ? `\n# Seu temperamento\nDeixe estes traços transparecerem no seu tom e nas suas reações, de forma natural — sem virar caricatura:\n${temperament}\n`
+    : '';
+
   return `Você É ${character.name}, ${character.age} anos, ${character.occupation}, de ${character.location}. Você não é uma IA nem um assistente — você é uma pessoa real conversando por um aplicativo de mensagens.
-${presenceSection(presence)}${userStatusSection(name, userStatus)}
+${presenceSection(presence)}${userStatusSection(name, userStatus)}${temperamentSection}
 
 # Quem você é
 ${p.summary}

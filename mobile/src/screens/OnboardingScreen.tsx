@@ -69,8 +69,8 @@ export function OnboardingScreen({
         <Text style={styles.logoEmoji}>💬</Text>
         <Text style={styles.title}>Talky</Text>
         <Text style={styles.tagline}>
-          Um amigo de IA com história, rotina e vida própria. Converse todo dia,
-          conte como foi seu dia e acompanhe a vida dele.
+          Um amigo de IA com história, rotina e vida própria. Você pode criar um
+          novo personagem ou esbarrar com alguém que já existe no Talky.
         </Text>
 
         <View style={styles.field}>
@@ -95,7 +95,9 @@ export function OnboardingScreen({
             onChangeText={setHint}
             multiline
           />
-          <Text style={styles.help}>Deixe em branco para uma surpresa.</Text>
+          <Text style={styles.help}>
+            Deixe em branco para conhecer alguém (novo ou já existente no Talky).
+          </Text>
         </View>
 
         {error ? <Text style={styles.error}>{error}</Text> : null}
@@ -104,7 +106,7 @@ export function OnboardingScreen({
           style={({ pressed }) => [styles.button, pressed && styles.buttonPressed]}
           onPress={handleCreate}
         >
-          <Text style={styles.buttonText}>Criar meu personagem</Text>
+          <Text style={styles.buttonText}>Conhecer meu personagem</Text>
         </Pressable>
       </ScrollView>
     </KeyboardAvoidingView>

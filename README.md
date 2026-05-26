@@ -22,9 +22,17 @@ Este repositório contém a **primeira entrega**: o loop principal funcionando.
   (dormindo, trabalhando, em reunião, vendo um filme, livre…) que define quando
   ele responde rápido, devagar ou só ao acordar. O app mostra o status dele e
   você também pode definir o **seu** status, que vira contexto pra ele comentar.
+- **Temperamento com níveis:** cada personagem tem intensidades (0-10) de traços
+  como ironia, sarcasmo, passivo-agressividade, doçura, brutalidade, implicância,
+  sonhador, ceticismo, nerdice, etc. — variando bastante entre personagens e
+  influenciando o tom das conversas.
+- **Personagens globais:** os personagens são únicos e compartilhados entre todos
+  os usuários. Ao entrar, você pode "esbarrar" com um personagem que já existe no
+  Talky (mesmo nome e identidade) em vez de criar um novo.
 
 > Funcionalidades da visão completa que ainda **não** estão aqui (ver Roadmap):
-> múltiplos personagens conversando entre si no mesmo grupo.
+> múltiplos personagens conversando entre si no mesmo grupo, e personagens
+> entrando na conversa de outros usuários.
 
 ## Arquitetura
 
@@ -222,6 +230,13 @@ A modelagem de dados já foi pensada para suportar grupos com vários personagen
       (Expo push + registro de token). Requer device físico e build com EAS.
 - [x] **Notícias e cotidiano:** mensagens proativas baseadas em busca na web
       sobre os interesses do personagem, clima, fofocas e acontecimentos reais.
+- [x] **Respostas com atraso humano + status:** agenda diária do personagem
+      (dormindo/trabalhando/reunião/filme/livre), atraso realista e status do
+      personagem e do usuário.
+- [x] **Temperamento com níveis:** traços (ironia, sarcasmo, doçura, etc.) com
+      intensidade 0-10 por personagem, influenciando o tom.
+- [x] **Personagens globais:** pool compartilhado — novos usuários podem
+      encontrar personagens já existentes (`CHARACTER_POOL_REUSE_CHANCE`).
 - [ ] **Acontecimentos na vida do personagem:** evoluir a linha do tempo ao
       longo do tempo (eventos novos, mudanças de humor, fatos do dia a dia).
 - [ ] **Múltiplos personagens:** introduzir novos personagens de forma orgânica

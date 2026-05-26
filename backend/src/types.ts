@@ -45,6 +45,8 @@ export interface Character {
   backstory: string;
   routine: string;
   timeline: TimelineEvent[];
+  /** Intensidade (0-10) de traços como ironia, sarcasmo, doçura, etc. */
+  temperament: Record<string, number>;
   /** Agenda diária típica — define o que faz e quão disponível está a cada hora. */
   schedule: ScheduleBlock[];
   createdAt: string;
