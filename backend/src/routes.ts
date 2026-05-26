@@ -1,6 +1,7 @@
 import { randomUUID } from 'crypto';
 import { Router } from 'express';
 import { generateCharacter, generateReply } from './ai';
+import { config } from './config';
 import { INTRO_DIRECTIVE } from './prompts';
 import { initProactiveForConversation, touchProactive } from './scheduler';
 import {
@@ -139,7 +140,13 @@ router.post('/conversations/:id/messages', async (req, res) => {
     }
 
     const history = getMessages(conversation.id);
-    const replyText = await generateReply(character, history, userName);
+    const replyText = await generateReply(
+      character,
+      history,
+      userName,
+      undefined,
+      config.webSearch.enabled && config.webSearch.inReplies,
+    );
     const replyMessage = characterMessage(conversation.id, character, replyText);
     addMessage(replyMessage);
 

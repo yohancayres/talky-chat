@@ -1,5 +1,5 @@
 import { randomUUID } from 'crypto';
-import { generateProactiveMessage } from './ai';
+import { generateNewsMessage, generateProactiveMessage } from './ai';
 import { config } from './config';
 import { sendPush } from './push';
 import {
@@ -84,13 +84,16 @@ async function fireProactive(conversationId: string, now: Date): Promise<void> {
   const history = getMessages(conversationId);
   const last = history[history.length - 1];
 
-  const text = await generateProactiveMessage(
-    character,
-    history,
-    conversation.userName,
-    now,
-    last?.createdAt,
-  );
+  // Parte das mensagens proativas é "movida a notícias": o personagem busca
+  // algo real e recente sobre seus interesses/cotidiano e comenta.
+  const useNews =
+    config.webSearch.enabled &&
+    character.interests.length > 0 &&
+    Math.random() < config.webSearch.newsChance;
+
+  const text = useNews
+    ? await generateNewsMessage(character, history, conversation.userName, now)
+    : await generateProactiveMessage(character, history, conversation.userName, now, last?.createdAt);
   if (!text.trim()) return;
 
   const message: Message = {

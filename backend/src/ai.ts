@@ -6,6 +6,7 @@ import {
   CHARACTER_GEN_SYSTEM,
   buildCharacterUserPrompt,
   buildChatSystemPrompt,
+  buildNewsDirective,
   buildProactiveDirective,
 } from './prompts';
 import { Character, Message } from './types';
@@ -18,6 +19,24 @@ function extractText(content: Anthropic.ContentBlock[]): string {
     .map((b) => b.text)
     .join('')
     .trim();
+}
+
+// Quando há busca na web, queremos só a mensagem final (texto após o último
+// uso de ferramenta), não eventuais comentários do modelo antes de pesquisar.
+function extractComposedText(content: Anthropic.ContentBlock[]): string {
+  let lastToolIndex = -1;
+  content.forEach((block, i) => {
+    if (block.type === 'server_tool_use' || block.type === 'web_search_tool_result') {
+      lastToolIndex = i;
+    }
+  });
+  const tail = lastToolIndex >= 0 ? content.slice(lastToolIndex + 1) : content;
+  const text = tail
+    .filter((b): b is Anthropic.TextBlock => b.type === 'text')
+    .map((b) => b.text)
+    .join('')
+    .trim();
+  return text || extractText(content);
 }
 
 function extractJSON(raw: string): Record<string, unknown> {
@@ -100,15 +119,18 @@ function buildApiMessages(history: Message[]): ApiMessage[] {
   }));
 }
 
+const WEB_SEARCH_TOOL = { type: 'web_search_20260209', name: 'web_search' } as const;
+
 /**
- * Gera a resposta do personagem. `directive` é uma instrução pontual (não
- * armazenada), usada para a primeira mensagem do personagem.
+ * Executa um turno do personagem no chat. `directive` é uma instrução pontual
+ * (não armazenada). Com `useWebSearch`, o personagem pode buscar na web.
  */
-export async function generateReply(
+async function runChat(
   character: Character,
   history: Message[],
   userName?: string,
   directive?: string,
+  useWebSearch = false,
 ): Promise<string> {
   const system = buildChatSystemPrompt(character, userName, todayStr());
   const messages = buildApiMessages(history);
@@ -125,25 +147,57 @@ export async function generateReply(
 
   const resp = await anthropic.messages.create({
     model: config.model,
-    max_tokens: 1024,
+    max_tokens: useWebSearch ? 1500 : 1024,
     system: [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }],
     messages,
+    ...(useWebSearch
+      ? { tools: [{ ...WEB_SEARCH_TOOL, max_uses: config.webSearch.maxUses }] }
+      : {}),
   });
 
-  return extractText(resp.content);
+  return extractComposedText(resp.content);
+}
+
+/**
+ * Gera a resposta do personagem. `directive` é uma instrução pontual (não
+ * armazenada), usada por ex. para a primeira mensagem do personagem.
+ */
+export function generateReply(
+  character: Character,
+  history: Message[],
+  userName?: string,
+  directive?: string,
+  useWebSearch = false,
+): Promise<string> {
+  return runChat(character, history, userName, directive, useWebSearch);
 }
 
 /**
  * Gera uma mensagem espontânea (proativa) do personagem, levando em conta o
  * horário e há quanto tempo a conversa está parada.
  */
-export async function generateProactiveMessage(
+export function generateProactiveMessage(
   character: Character,
   history: Message[],
   userName: string | undefined,
   now: Date,
   lastMessageAt?: string,
 ): Promise<string> {
-  const directive = buildProactiveDirective(now, lastMessageAt);
-  return generateReply(character, history, userName, directive);
+  return runChat(character, history, userName, buildProactiveDirective(now, lastMessageAt));
+}
+
+/**
+ * Gera uma mensagem proativa baseada em uma notícia/assunto real e recente,
+ * usando busca na web. Cai de volta para uma mensagem espontânea normal se a
+ * busca não render nada.
+ */
+export async function generateNewsMessage(
+  character: Character,
+  history: Message[],
+  userName: string | undefined,
+  now: Date,
+): Promise<string> {
+  const text = await runChat(character, history, userName, buildNewsDirective(character, now), true);
+  if (text.trim()) return text;
+  return runChat(character, history, userName, buildProactiveDirective(now));
 }

@@ -15,10 +15,12 @@ Este repositório contém a **primeira entrega**: o loop principal funcionando.
   conversa fica em silêncio, respeitando horário do dia e um "horário de sono".
 - **Notificações push:** as mensagens proativas chegam como notificação mesmo
   com o app fechado (via Expo push).
+- **Notícias e cotidiano (busca na web):** parte das mensagens proativas é
+  baseada em algo **real e recente** — notícias dos interesses do personagem,
+  clima, fofocas, esportes — usando a busca na web do Claude.
 
 > Funcionalidades da visão completa que ainda **não** estão aqui (ver Roadmap):
-> análise de notícias do interesse do personagem, e múltiplos personagens
-> conversando entre si no mesmo grupo.
+> múltiplos personagens conversando entre si no mesmo grupo.
 
 ## Arquitetura
 
@@ -138,6 +140,25 @@ As mensagens proativas também chegam como **notificação** com o app fechado:
 > limitado e pode não funcionar dependendo da versão. Em emulador/web o app
 > simplesmente ignora o push e continua usando o polling em primeiro plano.
 
+## Notícias e cotidiano (busca na web)
+
+Para o personagem parecer ancorado no mundo real, parte das mensagens proativas
+é "movida a notícias": o personagem usa a **ferramenta de busca na web do
+Claude** (server-side) para achar algo **real e recente** sobre seus interesses
+(ou clima, fofocas, esportes, tecnologia) e comenta no estilo dele, com opinião.
+
+- A decisão acontece no agendador: com chance `PROACTIVE_NEWS_CHANCE` a mensagem
+  proativa vira uma mensagem de notícia. Se a busca não render, cai de volta
+  para uma mensagem espontânea normal.
+- A lógica está em `backend/src/ai.ts` (`generateNewsMessage`) e no prompt
+  `buildNewsDirective` em `backend/src/prompts.ts`.
+- Opcionalmente, as **respostas normais** também podem buscar na web
+  (`WEB_SEARCH_IN_REPLIES=true`) — útil quando o usuário pergunta sobre algo
+  atual, ao custo de mais latência. Desligado por padrão.
+
+> Requer um modelo com suporte à busca (o padrão `claude-opus-4-7` suporta). A
+> busca roda no servidor da Anthropic; nada é configurado no app.
+
 ## API do backend
 
 | Método | Rota                                | Descrição                                    |
@@ -159,8 +180,8 @@ A modelagem de dados já foi pensada para suportar grupos com vários personagen
       anti-spam. Entrega via polling.
 - [x] **Notificações push:** mensagens proativas entregues com o app fechado
       (Expo push + registro de token). Requer device físico e build com EAS.
-- [ ] **Notícias e cotidiano:** buscar notícias dos interesses do personagem
-      (ex: via web search) e gerar conversas sobre clima, política e fofocas.
+- [x] **Notícias e cotidiano:** mensagens proativas baseadas em busca na web
+      sobre os interesses do personagem, clima, fofocas e acontecimentos reais.
 - [ ] **Acontecimentos na vida do personagem:** evoluir a linha do tempo ao
       longo do tempo (eventos novos, mudanças de humor, fatos do dia a dia).
 - [ ] **Múltiplos personagens:** introduzir novos personagens de forma orgânica

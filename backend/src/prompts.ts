@@ -135,6 +135,26 @@ function gapPhrase(now: Date, lastMessageAt?: string): string {
   return `Faz ${days} dia${days > 1 ? 's' : ''} que vocês não conversam.`;
 }
 
+const GENERAL_TOPICS = [
+  'as notícias mais comentadas de hoje',
+  'o tempo e o clima de hoje',
+  'algum acontecimento recente no mundo',
+  'alguma fofoca ou novidade de celebridades',
+  'novidades de tecnologia',
+  'algo recente no esporte',
+];
+
+// Instrução (não armazenada) para o personagem puxar assunto a partir de uma
+// notícia/assunto real e recente, usando busca na web.
+export function buildNewsDirective(character: Character, now: Date): string {
+  const dayName = now.toLocaleDateString('pt-BR', { weekday: 'long' });
+  const period = periodOfDay(now.getHours());
+  // Viés para os interesses do personagem, com alguns temas gerais do cotidiano.
+  const pool = [...character.interests, ...character.interests, ...GENERAL_TOPICS];
+  const topic = pool[Math.floor(Math.random() * pool.length)] ?? 'as notícias de hoje';
+  return `(Direção de cena — não responda a esta instrução, apenas aja conforme ela.) É ${dayName}, ${period}. Use a busca na web para encontrar algo REAL e RECENTE sobre ${topic}. Em seguida, puxe assunto do nada comentando isso com a pessoa, do SEU jeito e com a SUA opinião, como quem acabou de ver a novidade e quer comentar com um amigo. Não narre que pesquisou, não cole links nem use formatação, e mande só a mensagem final — curta e natural. Se não achar nada relevante, comente o assunto de forma geral, sem inventar fatos.`;
+}
+
 // Instrução (não armazenada) para o personagem mandar uma mensagem do nada.
 export function buildProactiveDirective(now: Date, lastMessageAt?: string): string {
   const dayName = now.toLocaleDateString('pt-BR', { weekday: 'long' });

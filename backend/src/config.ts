@@ -21,6 +21,16 @@ export const config = {
     // Máximo de mensagens seguidas do personagem sem resposta do usuário.
     maxConsecutive: Number(process.env.PROACTIVE_MAX_CONSECUTIVE ?? 3),
   },
+  webSearch: {
+    // O personagem usa busca na web para comentar notícias/cotidiano reais.
+    enabled: (process.env.WEB_SEARCH_ENABLED ?? 'true') !== 'false',
+    // Quantas buscas o modelo pode fazer por mensagem.
+    maxUses: Number(process.env.WEB_SEARCH_MAX_USES ?? 3),
+    // Chance (0-1) de uma mensagem proativa ser baseada em notícias do dia.
+    newsChance: Number(process.env.PROACTIVE_NEWS_CHANCE ?? 0.4),
+    // Permite busca também nas respostas normais (mais lento). Padrão: desligado.
+    inReplies: (process.env.WEB_SEARCH_IN_REPLIES ?? 'false') === 'true',
+  },
 };
 
 if (!config.anthropicApiKey) {
