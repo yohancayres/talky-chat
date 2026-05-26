@@ -92,6 +92,13 @@ export const api = {
     });
   },
 
+  // Gera ou troca a foto de perfil do personagem.
+  regenerateAvatar(characterId: string): Promise<{ character: Character }> {
+    return request<{ character: Character }>(`/api/characters/${characterId}/avatar`, {
+      method: 'POST',
+    });
+  },
+
   // Define o status do usuário (string vazia = disponível/limpar).
   setUserStatus(conversationId: string, status: string): Promise<{ ok: boolean }> {
     return request<{ ok: boolean }>(`/api/conversations/${conversationId}/user-status`, {

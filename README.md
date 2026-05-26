@@ -225,6 +225,16 @@ Ao criar um personagem novo, o backend:
 O app mostra a foto no chat, nas mensagens e no perfil; se não houver foto
 (sem `OPENAI_API_KEY`, geração desligada ou falha), cai no avatar de emoji.
 
+No **perfil do personagem** (toque no cabeçalho do chat) há um botão para
+**gerar/trocar a foto**:
+
+- Se o personagem ainda não tem foto (ex: criado antes deste recurso), gera uma
+  do zero.
+- Se já tem, mantém as **mesmas feições** (usando a descrição `appearance`, que é
+  criada na hora se faltar) mas em **outro cenário, ângulo, luz e roupa**.
+
+Isso resolve também a geração de foto para personagens **já criados**.
+
 - É **opcional**: defina `OPENAI_API_KEY` no `backend/.env` para ativar.
 - A foto é gerada **em paralelo** com a 1ª mensagem, então não soma latência.
 - Personagens reusados do pool global já trazem a foto criada anteriormente.
@@ -242,6 +252,7 @@ O app mostra a foto no chat, nas mensagens e no perfil; se não houver foto
 | `POST` | `/api/conversations/:id/messages`   | Envia mensagem (resposta vem com atraso, via polling). |
 | `POST` | `/api/conversations/:id/push-token` | Registra um token de push (Expo).            |
 | `POST` | `/api/conversations/:id/user-status` | Define o status do usuário (contexto pro personagem). |
+| `POST` | `/api/characters/:id/avatar`        | Gera/troca a foto de perfil do personagem.   |
 
 ## Roadmap (visão completa)
 

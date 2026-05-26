@@ -68,6 +68,29 @@ function todayStr(): string {
   });
 }
 
+/**
+ * Gera uma descrição física curta para personagens que não têm `appearance`
+ * (criados antes desse recurso), para manter as feições ao trocar a foto.
+ */
+export async function generateAppearance(character: Character): Promise<string> {
+  try {
+    const resp = await anthropic.messages.create({
+      model: config.model,
+      max_tokens: 300,
+      messages: [
+        {
+          role: 'user',
+          content: `Descreva em 1-2 frases a aparência física de ${character.name}, ${character.age} anos, ${character.occupation} de ${character.location}, para uma foto de perfil: idade aparente, etnia/traços, cabelo, estilo e expressão típica. Responda só com a descrição, sem rótulos.`,
+        },
+      ],
+    });
+    return extractText(resp.content);
+  } catch (err) {
+    console.warn('[talky] não foi possível gerar a aparência:', err);
+    return '';
+  }
+}
+
 export async function generateCharacter(
   hint?: string,
   userName?: string,

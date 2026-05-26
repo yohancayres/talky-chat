@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
+  Alert,
   AppState,
   FlatList,
   KeyboardAvoidingView,
@@ -38,7 +39,7 @@ function characterStatusLabel(status: ChatStatus | null, character: Character): 
 
 export function ChatScreen({
   conversationId,
-  character,
+  character: initialCharacter,
   initialMessages,
   userName,
   initialStatus,
@@ -53,6 +54,8 @@ export function ChatScreen({
   initialUserStatus?: string;
   onReset: () => void;
 }) {
+  const [character, setCharacter] = useState<Character>(initialCharacter);
+  const [regeneratingPhoto, setRegeneratingPhoto] = useState(false);
   const [messages, setMessages] = useState<Message[]>(initialMessages);
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
@@ -157,6 +160,19 @@ export function ChatScreen({
     }
   }
 
+  async function handleRegeneratePhoto() {
+    if (regeneratingPhoto) return;
+    setRegeneratingPhoto(true);
+    try {
+      const res = await api.regenerateAvatar(character.id);
+      setCharacter(res.character);
+    } catch (e) {
+      Alert.alert('Foto de perfil', e instanceof Error ? e.message : 'Não foi possível gerar a foto.');
+    } finally {
+      setRegeneratingPhoto(false);
+    }
+  }
+
   async function selectUserStatus(label: string) {
     const value = label === 'Disponível' ? '' : label;
     setUserStatus(value);
@@ -243,6 +259,8 @@ export function ChatScreen({
       <CharacterProfileModal
         visible={profileOpen}
         character={character}
+        regeneratingPhoto={regeneratingPhoto}
+        onRegeneratePhoto={handleRegeneratePhoto}
         onClose={() => setProfileOpen(false)}
         onReset={() => {
           setProfileOpen(false);

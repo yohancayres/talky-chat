@@ -73,15 +73,25 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 export function CharacterProfileModal({
   visible,
   character,
+  regeneratingPhoto,
+  onRegeneratePhoto,
   onClose,
   onReset,
 }: {
   visible: boolean;
   character: Character | null;
+  regeneratingPhoto?: boolean;
+  onRegeneratePhoto?: () => void;
   onClose: () => void;
   onReset: () => void;
 }) {
   if (!character) return null;
+
+  const photoLabel = regeneratingPhoto
+    ? 'Gerando foto...'
+    : character.photoUrl
+      ? 'Trocar foto de perfil'
+      : 'Gerar foto de perfil';
 
   return (
     <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
@@ -101,6 +111,16 @@ export function CharacterProfileModal({
             {character.occupation}
             {character.location ? ` · ${character.location}` : ''}
           </Text>
+
+          {onRegeneratePhoto && (
+            <Pressable
+              style={[styles.photoButton, regeneratingPhoto && styles.photoButtonDisabled]}
+              onPress={onRegeneratePhoto}
+              disabled={regeneratingPhoto}
+            >
+              <Text style={styles.photoButtonText}>{photoLabel}</Text>
+            </Pressable>
+          )}
 
           {character.personality.summary ? (
             <Text style={styles.summary}>{character.personality.summary}</Text>
@@ -172,6 +192,16 @@ const styles = StyleSheet.create({
   avatar: { marginTop: 8 },
   name: { fontSize: 24, fontWeight: '700', color: colors.text, marginTop: 14 },
   subtitle: { fontSize: 15, color: colors.muted, marginTop: 4, textAlign: 'center' },
+  photoButton: {
+    marginTop: 14,
+    borderWidth: 1,
+    borderColor: colors.accent,
+    borderRadius: radius.md,
+    paddingVertical: 9,
+    paddingHorizontal: 18,
+  },
+  photoButtonDisabled: { opacity: 0.5 },
+  photoButtonText: { color: colors.accent, fontSize: 14, fontWeight: '600' },
   summary: {
     fontSize: 16,
     color: colors.text,
