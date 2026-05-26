@@ -2,6 +2,7 @@ import { randomUUID } from 'crypto';
 import { Router } from 'express';
 import { generateCharacter, generateReply } from './ai';
 import { INTRO_DIRECTIVE } from './prompts';
+import { initProactiveForConversation, touchProactive } from './scheduler';
 import {
   addMessage,
   getCharacter,
@@ -41,9 +42,11 @@ router.post('/characters/generate', async (req, res) => {
       id: randomUUID(),
       title: character.name,
       characterIds: [character.id],
+      userName: typeof userName === 'string' ? userName.trim() : undefined,
       createdAt: new Date().toISOString(),
     };
     saveConversation(conversation);
+    initProactiveForConversation(conversation.id);
 
     const introText = await generateReply(character, [], userName, INTRO_DIRECTIVE);
     const introMessage = characterMessage(conversation.id, character, introText);
@@ -68,6 +71,22 @@ router.get('/conversations/:id', (req, res) => {
     .filter((c): c is Character => Boolean(c));
   const messages = getMessages(conversation.id);
   res.json({ conversation, characters, messages });
+});
+
+// Polling: retorna apenas as mensagens criadas depois de `after` (ISO).
+// Usado pelo app para receber mensagens proativas e respostas em tempo quase real.
+router.get('/conversations/:id/messages', (req, res) => {
+  const conversation = getConversation(req.params.id);
+  if (!conversation) {
+    res.status(404).json({ error: 'Conversa não encontrada.' });
+    return;
+  }
+  const after = typeof req.query.after === 'string' ? req.query.after : undefined;
+  let messages = getMessages(conversation.id);
+  if (after) {
+    messages = messages.filter((m) => m.createdAt > after);
+  }
+  res.json({ messages });
 });
 
 // Envia uma mensagem do usuário e devolve a(s) resposta(s) do personagem.
@@ -106,6 +125,10 @@ router.post('/conversations/:id/messages', async (req, res) => {
     const replyText = await generateReply(character, history, userName);
     const replyMessage = characterMessage(conversation.id, character, replyText);
     addMessage(replyMessage);
+
+    // Reinicia o cronômetro de silêncio: nada de mensagem proativa logo após
+    // uma conversa ativa.
+    touchProactive(conversation.id);
 
     res.json({ userMessage, replies: [replyMessage] });
   } catch (err) {

@@ -48,5 +48,15 @@ export interface Conversation {
   title: string;
   /** Suporta múltiplos personagens (grupo). Por ora, começa com um. */
   characterIds: string[];
+  /** Nome de quem conversa — usado nas mensagens proativas. */
+  userName?: string;
   createdAt: string;
+}
+
+/** Estado de agendamento das mensagens proativas de uma conversa. */
+export interface ProactiveState {
+  conversationId: string;
+  /** Quando a próxima mensagem espontânea está prevista (ISO). */
+  nextAt: string;
+  enabled: boolean;
 }

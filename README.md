@@ -11,10 +11,12 @@ Este repositório contém a **primeira entrega**: o loop principal funcionando.
 - **Chat diário** em que o personagem responde sempre dentro do personagem,
   com memória da conversa.
 - **Perfil do personagem** com biografia, personalidade e linha do tempo da vida.
+- **Mensagens proativas:** o personagem manda mensagens sozinho quando a
+  conversa fica em silêncio, respeitando horário do dia e um "horário de sono".
 
 > Funcionalidades da visão completa que ainda **não** estão aqui (ver Roadmap):
-> mensagens proativas, análise de notícias do interesse do personagem, e
-> múltiplos personagens conversando entre si no mesmo grupo.
+> notificações push (com o app fechado), análise de notícias do interesse do
+> personagem, e múltiplos personagens conversando entre si no mesmo grupo.
 
 ## Arquitetura
 
@@ -53,6 +55,7 @@ Variáveis em `backend/.env`:
 | `ANTHROPIC_API_KEY` | Sua chave da Anthropic (obrigatória).                  |
 | `TALKY_MODEL`       | Modelo. Padrão `claude-opus-4-7`. Para respostas mais rápidas/baratas: `claude-sonnet-4-6`. |
 | `PORT`              | Porta do servidor (padrão `3000`).                     |
+| `PROACTIVE_*`       | Configuração das mensagens proativas (ver `.env.example`). |
 
 Teste rápido: `curl http://localhost:3000/health`
 
@@ -89,6 +92,35 @@ Abra no Expo Go (escaneando o QR code) ou pressione `i`/`a` para emulador.
 3. O `conversationId` fica salvo no celular (AsyncStorage), então a conversa
    continua a cada vez que você abre o app.
 
+## Mensagens proativas
+
+Um agendador no backend (`backend/src/scheduler.ts`) faz o personagem mandar
+mensagens **sozinho** quando a conversa fica em silêncio:
+
+- Depois de cada interação, agenda a próxima mensagem espontânea para daqui a um
+  intervalo aleatório (`PROACTIVE_MIN_GAP_MINUTES`–`PROACTIVE_MAX_GAP_MINUTES`).
+- Respeita o "horário de sono" do personagem (`PROACTIVE_QUIET_*`).
+- A mensagem é gerada no personagem, levando em conta o horário do dia e há
+  quanto tempo vocês não se falam.
+- Não acumula mensagens sem resposta (para de insistir após
+  `PROACTIVE_MAX_CONSECUTIVE` mensagens seguidas sem o usuário responder).
+
+O app recebe essas mensagens por **polling** (`GET .../messages?after=<ISO>`)
+enquanto está aberto, e também busca o que chegou ao reabrir/voltar ao foco.
+
+### Testar rápido
+
+Os intervalos padrão são de horas (realista). Para ver acontecer em ~1 minuto,
+rode o backend com intervalos curtos:
+
+```bash
+PROACTIVE_MIN_GAP_MINUTES=1 PROACTIVE_MAX_GAP_MINUTES=2 PROACTIVE_QUIET_START=0 PROACTIVE_QUIET_END=0 npm run dev
+```
+
+(`PROACTIVE_QUIET_START=0 PROACTIVE_QUIET_END=0` desliga o horário de sono para
+o teste.) Crie um personagem, deixe o chat aberto sem responder e aguarde — a
+mensagem espontânea aparece sozinha.
+
 ## API do backend
 
 | Método | Rota                                | Descrição                                    |
@@ -96,6 +128,7 @@ Abra no Expo Go (escaneando o QR code) ou pressione `i`/`a` para emulador.
 | `GET`  | `/health`                           | Status do servidor.                          |
 | `POST` | `/api/characters/generate`          | Gera personagem + conversa + 1ª mensagem.    |
 | `GET`  | `/api/conversations/:id`            | Retorna conversa, personagens e histórico.   |
+| `GET`  | `/api/conversations/:id/messages?after=<ISO>` | Mensagens novas (polling).         |
 | `POST` | `/api/conversations/:id/messages`   | Envia mensagem e recebe a resposta.          |
 
 ## Roadmap (visão completa)
@@ -103,8 +136,11 @@ Abra no Expo Go (escaneando o QR code) ou pressione `i`/`a` para emulador.
 A modelagem de dados já foi pensada para suportar grupos com vários personagens
 (`Conversation.characterIds` é uma lista). Próximos passos naturais:
 
-- [ ] **Mensagens proativas:** um agendador no backend que faz o personagem
-      mandar mensagem sozinho (manhã/noite), reagindo à rotina e ao humor.
+- [x] **Mensagens proativas:** agendador no backend que faz o personagem mandar
+      mensagem sozinho quando a conversa esfria, com horário de sono e limite
+      anti-spam. Entrega via polling.
+- [ ] **Notificações push:** entregar as mensagens proativas com o app fechado
+      (Expo push + registro de token). Hoje a entrega é só com o app aberto.
 - [ ] **Notícias e cotidiano:** buscar notícias dos interesses do personagem
       (ex: via web search) e gerar conversas sobre clima, política e fofocas.
 - [ ] **Acontecimentos na vida do personagem:** evoluir a linha do tempo ao

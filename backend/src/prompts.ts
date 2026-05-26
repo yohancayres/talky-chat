@@ -109,3 +109,37 @@ ${p.speakingStyle}
 // Instrução (não armazenada) para o personagem mandar a primeira mensagem.
 export const INTRO_DIRECTIVE =
   'Você acabou de entrar nessa conversa pela primeira vez e quer puxar papo. Mande a primeira mensagem de forma natural e curta, se apresentando do seu jeito, como uma pessoa real iniciando uma conversa num app de mensagens.';
+
+const PROACTIVE_FLAVORS = [
+  'Mande um oi rápido e espontâneo.',
+  'Conte algo que aconteceu no seu dia ou na sua rotina.',
+  'Comente sobre algo de um dos seus interesses.',
+  'Pergunte como a pessoa está ou como foi o dia dela.',
+  'Compartilhe um pensamento, algo que te animou ou te incomodou hoje.',
+];
+
+function periodOfDay(hour: number): string {
+  if (hour < 6) return 'de madrugada';
+  if (hour < 12) return 'de manhã';
+  if (hour < 18) return 'à tarde';
+  return 'à noite';
+}
+
+function gapPhrase(now: Date, lastMessageAt?: string): string {
+  if (!lastMessageAt) return '';
+  const minutes = (now.getTime() - new Date(lastMessageAt).getTime()) / 60000;
+  if (minutes < 90) return 'Faz pouco tempo que vocês se falaram.';
+  if (minutes < 60 * 8) return 'Faz algumas horas que vocês não se falam.';
+  if (minutes < 60 * 24) return 'Vocês não se falam desde mais cedo.';
+  const days = Math.floor(minutes / 60 / 24);
+  return `Faz ${days} dia${days > 1 ? 's' : ''} que vocês não conversam.`;
+}
+
+// Instrução (não armazenada) para o personagem mandar uma mensagem do nada.
+export function buildProactiveDirective(now: Date, lastMessageAt?: string): string {
+  const dayName = now.toLocaleDateString('pt-BR', { weekday: 'long' });
+  const period = periodOfDay(now.getHours());
+  const gap = gapPhrase(now, lastMessageAt);
+  const flavor = PROACTIVE_FLAVORS[Math.floor(Math.random() * PROACTIVE_FLAVORS.length)];
+  return `(Direção de cena — não responda a esta instrução, apenas aja conforme ela.) É ${dayName}, ${period}. ${gap} Você resolveu mandar uma mensagem do nada para a pessoa, como um amigo de verdade faria sem ser provocado. ${flavor} Seja natural, curto e fiel ao seu jeito de escrever. Não mencione que isto é uma direção de cena.`;
+}

@@ -1,5 +1,6 @@
-import React, { useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
+  AppState,
   FlatList,
   KeyboardAvoidingView,
   Platform,
@@ -35,9 +36,60 @@ export function ChatScreen({
   const [profileOpen, setProfileOpen] = useState(false);
   const listRef = useRef<FlatList<Message>>(null);
 
-  function scrollToEnd() {
+  // Marca a última mensagem do servidor já recebida (para o polling).
+  const lastSyncRef = useRef<string>(
+    initialMessages.length ? initialMessages[initialMessages.length - 1].createdAt : '',
+  );
+
+  const scrollToEnd = useCallback(() => {
     requestAnimationFrame(() => listRef.current?.scrollToEnd({ animated: true }));
-  }
+  }, []);
+
+  // Insere mensagens novas do servidor (sem duplicar) e avança o marcador.
+  const mergeIncoming = useCallback((incoming: Message[]) => {
+    if (incoming.length === 0) return;
+    setMessages((prev) => {
+      const seen = new Set(prev.map((m) => m.id));
+      const merged = [...prev];
+      for (const m of incoming) {
+        if (!seen.has(m.id)) merged.push(m);
+      }
+      merged.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+      return merged;
+    });
+    for (const m of incoming) {
+      if (m.createdAt > lastSyncRef.current) lastSyncRef.current = m.createdAt;
+    }
+  }, []);
+
+  // Polling: recebe mensagens proativas (e respostas) enquanto o app está aberto.
+  useEffect(() => {
+    let active = true;
+
+    async function poll() {
+      try {
+        const res = await api.getNewMessages(conversationId, lastSyncRef.current);
+        if (active && res.messages.length > 0) {
+          mergeIncoming(res.messages);
+          scrollToEnd();
+        }
+      } catch {
+        // silencioso: tenta de novo no próximo ciclo
+      }
+    }
+
+    poll();
+    const interval = setInterval(poll, 8000);
+    const subscription = AppState.addEventListener('change', (state) => {
+      if (state === 'active') poll();
+    });
+
+    return () => {
+      active = false;
+      clearInterval(interval);
+      subscription.remove();
+    };
+  }, [conversationId, mergeIncoming, scrollToEnd]);
 
   async function handleSend() {
     const text = draft.trim();
@@ -59,10 +111,8 @@ export function ChatScreen({
 
     try {
       const res = await api.sendMessage(conversationId, text, userName);
-      setMessages((prev) => {
-        const withoutOptimistic = prev.filter((m) => m.id !== optimistic.id);
-        return [...withoutOptimistic, res.userMessage, ...res.replies];
-      });
+      setMessages((prev) => prev.filter((m) => m.id !== optimistic.id));
+      mergeIncoming([res.userMessage, ...res.replies]);
     } catch (e) {
       const errorText = e instanceof Error ? e.message : 'Falha ao enviar.';
       const systemMsg: Message = {

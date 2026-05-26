@@ -1,6 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import { Character, Conversation, Message } from './types';
+import { Character, Conversation, Message, ProactiveState } from './types';
 
 // Persistência simples em arquivo JSON. Suficiente para o protótipo;
 // trocar por um banco de dados real quando o app crescer.
@@ -11,15 +11,17 @@ interface DB {
   characters: Record<string, Character>;
   conversations: Record<string, Conversation>;
   messages: Message[];
+  proactive: Record<string, ProactiveState>;
 }
 
 function emptyDB(): DB {
-  return { characters: {}, conversations: {}, messages: [] };
+  return { characters: {}, conversations: {}, messages: [], proactive: {} };
 }
 
 function load(): DB {
   try {
-    return JSON.parse(fs.readFileSync(DB_FILE, 'utf-8')) as DB;
+    const parsed = JSON.parse(fs.readFileSync(DB_FILE, 'utf-8')) as Partial<DB>;
+    return { ...emptyDB(), ...parsed };
   } catch {
     return emptyDB();
   }
@@ -59,4 +61,17 @@ export function getMessages(conversationId: string): Message[] {
   return db.messages
     .filter((m) => m.conversationId === conversationId)
     .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+}
+
+export function setProactiveState(state: ProactiveState): void {
+  db.proactive[state.conversationId] = state;
+  persist();
+}
+
+export function getProactiveState(conversationId: string): ProactiveState | undefined {
+  return db.proactive[conversationId];
+}
+
+export function listProactiveStates(): ProactiveState[] {
+  return Object.values(db.proactive);
 }

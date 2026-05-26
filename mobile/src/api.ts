@@ -39,6 +39,10 @@ export interface SendMessageResponse {
   replies: Message[];
 }
 
+export interface MessagesResponse {
+  messages: Message[];
+}
+
 export const api = {
   baseUrl: BASE_URL,
 
@@ -64,6 +68,14 @@ export const api = {
         method: 'POST',
         body: JSON.stringify({ text, userName }),
       },
+    );
+  },
+
+  // Busca mensagens criadas depois de `afterIso` (mensagens proativas e respostas).
+  getNewMessages(conversationId: string, afterIso: string): Promise<MessagesResponse> {
+    const query = afterIso ? `?after=${encodeURIComponent(afterIso)}` : '';
+    return request<MessagesResponse>(
+      `/api/conversations/${conversationId}/messages${query}`,
     );
   },
 };

@@ -6,6 +6,7 @@ import {
   CHARACTER_GEN_SYSTEM,
   buildCharacterUserPrompt,
   buildChatSystemPrompt,
+  buildProactiveDirective,
 } from './prompts';
 import { Character, Message } from './types';
 
@@ -130,4 +131,19 @@ export async function generateReply(
   });
 
   return extractText(resp.content);
+}
+
+/**
+ * Gera uma mensagem espontânea (proativa) do personagem, levando em conta o
+ * horário e há quanto tempo a conversa está parada.
+ */
+export async function generateProactiveMessage(
+  character: Character,
+  history: Message[],
+  userName: string | undefined,
+  now: Date,
+  lastMessageAt?: string,
+): Promise<string> {
+  const directive = buildProactiveDirective(now, lastMessageAt);
+  return generateReply(character, history, userName, directive);
 }
