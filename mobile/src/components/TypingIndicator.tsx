@@ -1,6 +1,8 @@
 import React, { useEffect, useRef } from 'react';
 import { Animated, StyleSheet, View } from 'react-native';
 import { colors } from '../theme';
+import { Character } from '../types';
+import { Avatar } from './Avatar';
 
 function Dot({ delay }: { delay: number }) {
   const opacity = useRef(new Animated.Value(0.3)).current;
@@ -19,11 +21,11 @@ function Dot({ delay }: { delay: number }) {
   return <Animated.View style={[styles.dot, { opacity }]} />;
 }
 
-export function TypingIndicator({ emoji, color }: { emoji: string; color: string }) {
+export function TypingIndicator({ character }: { character: Character }) {
   return (
     <View style={styles.row}>
-      <View style={[styles.avatar, { backgroundColor: color }]}>
-        <Animated.Text style={styles.avatarEmoji}>{emoji}</Animated.Text>
+      <View style={styles.avatar}>
+        <Avatar character={character} size={34} />
       </View>
       <View style={styles.bubble}>
         <Dot delay={0} />
@@ -41,15 +43,7 @@ const styles = StyleSheet.create({
     marginVertical: 4,
     paddingHorizontal: 12,
   },
-  avatar: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 8,
-  },
-  avatarEmoji: { fontSize: 18 },
+  avatar: { marginRight: 8 },
   bubble: {
     flexDirection: 'row',
     alignItems: 'center',

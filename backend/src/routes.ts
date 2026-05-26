@@ -3,6 +3,7 @@ import { Router } from 'express';
 import { generateCharacter, generateReply } from './ai';
 import { computeReplyDueAt } from './availability';
 import { config } from './config';
+import { generateAvatar } from './image';
 import { INTRO_DIRECTIVE } from './prompts';
 import {
   getConversationStatus,
@@ -68,6 +69,10 @@ router.post('/characters/generate', async (req, res) => {
       saveCharacter(character);
     }
 
+    // Personagem novo sem foto: gera a foto de perfil (em paralelo com o intro,
+    // mais abaixo). Personagem reusado já traz a foto (se tiver).
+    const needsPhoto = !existing && !character.photoUrl;
+
     const conversation: Conversation = {
       id: randomUUID(),
       title: character.name,
@@ -78,11 +83,18 @@ router.post('/characters/generate', async (req, res) => {
     saveConversation(conversation);
     initProactiveForConversation(conversation.id);
 
-    // A mensagem de boas-vindas é imediata (não cair num chat vazio).
-    const introText = await generateReply(character, [], {
-      userName,
-      directive: INTRO_DIRECTIVE,
-    });
+    // A mensagem de boas-vindas é imediata (não cair num chat vazio). Geramos a
+    // foto de perfil em paralelo para não somar latências.
+    const [introText, photoUrl] = await Promise.all([
+      generateReply(character, [], { userName, directive: INTRO_DIRECTIVE }),
+      needsPhoto ? generateAvatar(character) : Promise.resolve(null),
+    ]);
+
+    if (photoUrl) {
+      character = { ...character, photoUrl };
+      saveCharacter(character);
+    }
+
     const introMessage = characterMessage(conversation.id, character, introText);
     addMessage(introMessage);
 

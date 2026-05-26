@@ -29,6 +29,9 @@ Este repositório contém a **primeira entrega**: o loop principal funcionando.
 - **Personagens globais:** os personagens são únicos e compartilhados entre todos
   os usuários. Ao entrar, você pode "esbarrar" com um personagem que já existe no
   Talky (mesmo nome e identidade) em vez de criar um novo.
+- **Foto de perfil gerada por IA:** ao criar o personagem, o backend resume as
+  características dele e pede uma foto de perfil realista à API de imagens da
+  OpenAI (`gpt-image-2`). É opcional — sem `OPENAI_API_KEY`, usa o avatar de emoji.
 
 > Funcionalidades da visão completa que ainda **não** estão aqui (ver Roadmap):
 > múltiplos personagens conversando entre si no mesmo grupo, e personagens
@@ -71,6 +74,8 @@ Variáveis em `backend/.env`:
 | `ANTHROPIC_API_KEY` | Sua chave da Anthropic (obrigatória).                  |
 | `TALKY_MODEL`       | Modelo. Padrão `claude-opus-4-7`. Para respostas mais rápidas/baratas: `claude-sonnet-4-6`. |
 | `PORT`              | Porta do servidor (padrão `3000`).                     |
+| `OPENAI_API_KEY`    | Chave da OpenAI para a foto de perfil (opcional).      |
+| `TALKY_IMAGE_MODEL` | Modelo de imagem. Padrão `gpt-image-2`.                |
 | `PROACTIVE_*`       | Configuração das mensagens proativas (ver `.env.example`). |
 
 Teste rápido: `curl http://localhost:3000/health`
@@ -206,6 +211,26 @@ REPLY_SPEED_FACTOR=0.05 npm run dev
 
 Para voltar ao comportamento antigo (resposta imediata): `REPLY_DELAY_ENABLED=false`.
 
+## Foto de perfil gerada por IA
+
+Ao criar um personagem novo, o backend:
+
+1. Gera as características do personagem (incluindo uma descrição física,
+   `appearance`).
+2. Resume tudo isso num prompt de foto de perfil realista
+   (`backend/src/image.ts`).
+3. Pede a imagem à API de imagens da OpenAI (`gpt-image-2`), salva em
+   `backend/data/avatars/<id>.png` e serve em `/avatars/<id>.png`.
+
+O app mostra a foto no chat, nas mensagens e no perfil; se não houver foto
+(sem `OPENAI_API_KEY`, geração desligada ou falha), cai no avatar de emoji.
+
+- É **opcional**: defina `OPENAI_API_KEY` no `backend/.env` para ativar.
+- A foto é gerada **em paralelo** com a 1ª mensagem, então não soma latência.
+- Personagens reusados do pool global já trazem a foto criada anteriormente.
+- Configurável: `TALKY_IMAGE_MODEL`, `TALKY_IMAGE_SIZE`, `OPENAI_IMAGE_ENDPOINT`,
+  `IMAGE_GEN_ENABLED`.
+
 ## API do backend
 
 | Método | Rota                                | Descrição                                    |
@@ -237,6 +262,8 @@ A modelagem de dados já foi pensada para suportar grupos com vários personagen
       intensidade 0-10 por personagem, influenciando o tom.
 - [x] **Personagens globais:** pool compartilhado — novos usuários podem
       encontrar personagens já existentes (`CHARACTER_POOL_REUSE_CHANCE`).
+- [x] **Foto de perfil por IA:** foto realista gerada a partir das
+      características do personagem (OpenAI `gpt-image-2`), com fallback no emoji.
 - [ ] **Acontecimentos na vida do personagem:** evoluir a linha do tempo ao
       longo do tempo (eventos novos, mudanças de humor, fatos do dia a dia).
 - [ ] **Múltiplos personagens:** introduzir novos personagens de forma orgânica

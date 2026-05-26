@@ -39,6 +39,10 @@ export interface Character {
   occupation: string;
   location: string;
   avatar: { emoji: string; color: string };
+  /** Descrição física, usada para gerar a foto de perfil. */
+  appearance?: string;
+  /** Caminho da foto de perfil gerada (ex: "/avatars/<id>.png"), se houver. */
+  photoUrl?: string;
   personality: Personality;
   /** Temas que interessam o personagem — base para conversas sobre notícias e cotidiano. */
   interests: string[];

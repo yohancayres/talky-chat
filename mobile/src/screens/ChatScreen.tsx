@@ -12,6 +12,7 @@ import {
   View,
 } from 'react-native';
 import { api } from '../api';
+import { Avatar } from '../components/Avatar';
 import { CharacterProfileModal } from '../components/CharacterProfileModal';
 import { MessageBubble } from '../components/MessageBubble';
 import { TypingIndicator } from '../components/TypingIndicator';
@@ -174,8 +175,8 @@ export function ChatScreen({
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
       <Pressable style={styles.header} onPress={() => setProfileOpen(true)}>
-        <View style={[styles.headerAvatar, { backgroundColor: character.avatar.color }]}>
-          <Text style={styles.headerEmoji}>{character.avatar.emoji}</Text>
+        <View style={styles.headerAvatar}>
+          <Avatar character={character} size={40} />
         </View>
         <View style={styles.headerInfo}>
           <Text style={styles.headerName}>{character.name}</Text>
@@ -217,9 +218,7 @@ export function ChatScreen({
         contentContainerStyle={styles.listContent}
         onContentSizeChange={scrollToEnd}
         ListFooterComponent={
-          isTyping ? (
-            <TypingIndicator emoji={character.avatar.emoji} color={character.avatar.color} />
-          ) : null
+          isTyping ? <TypingIndicator character={character} /> : null
         }
       />
 
@@ -266,15 +265,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
   },
-  headerAvatar: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 12,
-  },
-  headerEmoji: { fontSize: 22 },
+  headerAvatar: { marginRight: 12 },
   headerInfo: { flex: 1 },
   headerName: { fontSize: 17, fontWeight: '700', color: colors.text },
   headerSubtitle: { fontSize: 13, color: colors.muted, marginTop: 1 },

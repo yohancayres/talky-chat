@@ -76,6 +76,7 @@ Responda SOMENTE com um objeto JSON válido. Sem markdown, sem cercas de código
   "location": string,
   "avatarEmoji": string,            // um único emoji que represente o personagem
   "avatarColor": string,            // cor em hexadecimal, ex: "#E07A5F"
+  "appearance": string,             // descrição física p/ foto de perfil: idade aparente, etnia/traços, cabelo, estilo, expressão típica
   "personalitySummary": string,     // 2-3 frases resumindo quem é
   "traits": string[],               // 4-6 traços de personalidade
   "quirks": string[],               // 2-4 manias/peculiaridades

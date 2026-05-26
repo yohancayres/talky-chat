@@ -19,6 +19,8 @@ export interface Character {
   occupation: string;
   location: string;
   avatar: { emoji: string; color: string };
+  photoUrl?: string;
+  appearance?: string;
   personality: Personality;
   interests: string[];
   backstory: string;

@@ -1,6 +1,7 @@
 import cors from 'cors';
 import express from 'express';
 import { config } from './config';
+import { AVATARS_DIR } from './image';
 import { router } from './routes';
 import { startScheduler } from './scheduler';
 
@@ -8,6 +9,9 @@ const app = express();
 
 app.use(cors());
 app.use(express.json());
+
+// Fotos de perfil geradas (servidas estaticamente).
+app.use('/avatars', express.static(AVATARS_DIR));
 
 app.get('/health', (_req, res) => {
   res.json({ ok: true, model: config.model });

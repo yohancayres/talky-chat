@@ -2,6 +2,7 @@ import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { colors } from '../theme';
 import { Character, Message } from '../types';
+import { Avatar } from './Avatar';
 
 export function MessageBubble({
   message,
@@ -22,8 +23,14 @@ export function MessageBubble({
 
   return (
     <View style={[styles.row, styles.rowStart]}>
-      <View style={[styles.avatar, { backgroundColor: character?.avatar.color ?? colors.accent }]}>
-        <Text style={styles.avatarEmoji}>{character?.avatar.emoji ?? '🙂'}</Text>
+      <View style={styles.avatarWrap}>
+        {character ? (
+          <Avatar character={character} size={34} />
+        ) : (
+          <View style={[styles.avatar, { backgroundColor: colors.accent }]}>
+            <Text style={styles.avatarEmoji}>🙂</Text>
+          </View>
+        )}
       </View>
       <View style={[styles.bubble, styles.charBubble]}>
         <Text style={styles.charText}>{message.text}</Text>
@@ -40,13 +47,13 @@ const styles = StyleSheet.create({
   },
   rowStart: { justifyContent: 'flex-start', alignItems: 'flex-end' },
   rowEnd: { justifyContent: 'flex-end' },
+  avatarWrap: { marginRight: 8 },
   avatar: {
     width: 34,
     height: 34,
     borderRadius: 17,
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: 8,
   },
   avatarEmoji: { fontSize: 18 },
   bubble: {

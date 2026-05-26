@@ -102,6 +102,7 @@ export async function generateCharacter(
       emoji: String(data.avatarEmoji ?? '🙂'),
       color: String(data.avatarColor ?? '#E07A5F'),
     },
+    appearance: String(data.appearance ?? ''),
     personality: {
       summary: String(data.personalitySummary ?? ''),
       traits: asStringArray(data.traits),

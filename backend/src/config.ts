@@ -6,6 +6,14 @@ export const config = {
   port: Number(process.env.PORT ?? 3000),
   anthropicApiKey: process.env.ANTHROPIC_API_KEY ?? '',
   model: process.env.TALKY_MODEL ?? 'claude-opus-4-7',
+  // Geração de imagem (foto de perfil) — usa a API de imagens da OpenAI.
+  openaiApiKey: process.env.OPENAI_API_KEY ?? '',
+  image: {
+    enabled: (process.env.IMAGE_GEN_ENABLED ?? 'true') !== 'false',
+    model: process.env.TALKY_IMAGE_MODEL ?? 'gpt-image-2',
+    size: process.env.TALKY_IMAGE_SIZE ?? '1024x1024',
+    endpoint: process.env.OPENAI_IMAGE_ENDPOINT ?? 'https://api.openai.com/v1/images/generations',
+  },
   proactive: {
     // O personagem manda mensagens sozinho quando a conversa fica em silêncio.
     enabled: (process.env.PROACTIVE_ENABLED ?? 'true') !== 'false',

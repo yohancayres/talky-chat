@@ -9,6 +9,7 @@ import {
 } from 'react-native';
 import { colors, radius } from '../theme';
 import { Character } from '../types';
+import { Avatar } from './Avatar';
 
 const TEMPERAMENT_LABELS: Record<string, string> = {
   ironia: 'Ironia',
@@ -92,8 +93,8 @@ export function CharacterProfileModal({
         </View>
 
         <ScrollView contentContainerStyle={styles.body}>
-          <View style={[styles.avatar, { backgroundColor: character.avatar.color }]}>
-            <Text style={styles.avatarEmoji}>{character.avatar.emoji}</Text>
+          <View style={styles.avatar}>
+            <Avatar character={character} size={88} />
           </View>
           <Text style={styles.name}>{character.name}, {character.age}</Text>
           <Text style={styles.subtitle}>
@@ -168,15 +169,7 @@ const styles = StyleSheet.create({
   },
   close: { color: colors.accent, fontSize: 16, fontWeight: '600' },
   body: { paddingHorizontal: 20, paddingBottom: 48, alignItems: 'center' },
-  avatar: {
-    width: 88,
-    height: 88,
-    borderRadius: 44,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: 8,
-  },
-  avatarEmoji: { fontSize: 44 },
+  avatar: { marginTop: 8 },
   name: { fontSize: 24, fontWeight: '700', color: colors.text, marginTop: 14 },
   subtitle: { fontSize: 15, color: colors.muted, marginTop: 4, textAlign: 'center' },
   summary: {
