@@ -13,10 +13,12 @@ Este repositório contém a **primeira entrega**: o loop principal funcionando.
 - **Perfil do personagem** com biografia, personalidade e linha do tempo da vida.
 - **Mensagens proativas:** o personagem manda mensagens sozinho quando a
   conversa fica em silêncio, respeitando horário do dia e um "horário de sono".
+- **Notificações push:** as mensagens proativas chegam como notificação mesmo
+  com o app fechado (via Expo push).
 
 > Funcionalidades da visão completa que ainda **não** estão aqui (ver Roadmap):
-> notificações push (com o app fechado), análise de notícias do interesse do
-> personagem, e múltiplos personagens conversando entre si no mesmo grupo.
+> análise de notícias do interesse do personagem, e múltiplos personagens
+> conversando entre si no mesmo grupo.
 
 ## Arquitetura
 
@@ -121,6 +123,21 @@ PROACTIVE_MIN_GAP_MINUTES=1 PROACTIVE_MAX_GAP_MINUTES=2 PROACTIVE_QUIET_START=0 
 o teste.) Crie um personagem, deixe o chat aberto sem responder e aguarde — a
 mensagem espontânea aparece sozinha.
 
+## Notificações push
+
+As mensagens proativas também chegam como **notificação** com o app fechado:
+
+1. Ao entrar no chat, o app pede permissão e registra um **Expo push token** no
+   backend (`POST /api/conversations/:id/push-token`).
+2. Quando o agendador dispara uma mensagem proativa, o backend envia um push
+   para os tokens daquela conversa (serviço da Expo, em `backend/src/push.ts`).
+
+> **Importante:** push exige um **device físico** e um projeto vinculado ao
+> **EAS** (para o `projectId`). Recomenda-se um **development build**
+> (`npx expo run:android` / `run:ios` ou EAS Build) — no Expo Go o push remoto é
+> limitado e pode não funcionar dependendo da versão. Em emulador/web o app
+> simplesmente ignora o push e continua usando o polling em primeiro plano.
+
 ## API do backend
 
 | Método | Rota                                | Descrição                                    |
@@ -130,6 +147,7 @@ mensagem espontânea aparece sozinha.
 | `GET`  | `/api/conversations/:id`            | Retorna conversa, personagens e histórico.   |
 | `GET`  | `/api/conversations/:id/messages?after=<ISO>` | Mensagens novas (polling).         |
 | `POST` | `/api/conversations/:id/messages`   | Envia mensagem e recebe a resposta.          |
+| `POST` | `/api/conversations/:id/push-token` | Registra um token de push (Expo).            |
 
 ## Roadmap (visão completa)
 
@@ -139,8 +157,8 @@ A modelagem de dados já foi pensada para suportar grupos com vários personagen
 - [x] **Mensagens proativas:** agendador no backend que faz o personagem mandar
       mensagem sozinho quando a conversa esfria, com horário de sono e limite
       anti-spam. Entrega via polling.
-- [ ] **Notificações push:** entregar as mensagens proativas com o app fechado
-      (Expo push + registro de token). Hoje a entrega é só com o app aberto.
+- [x] **Notificações push:** mensagens proativas entregues com o app fechado
+      (Expo push + registro de token). Requer device físico e build com EAS.
 - [ ] **Notícias e cotidiano:** buscar notícias dos interesses do personagem
       (ex: via web search) e gerar conversas sobre clima, política e fofocas.
 - [ ] **Acontecimentos na vida do personagem:** evoluir a linha do tempo ao

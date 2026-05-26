@@ -1,11 +1,13 @@
 import { randomUUID } from 'crypto';
 import { generateProactiveMessage } from './ai';
 import { config } from './config';
+import { sendPush } from './push';
 import {
   addMessage,
   getCharacter,
   getConversation,
   getMessages,
+  getPushTokens,
   listProactiveStates,
   setProactiveState,
 } from './store';
@@ -101,6 +103,9 @@ async function fireProactive(conversationId: string, now: Date): Promise<void> {
     createdAt: new Date().toISOString(),
   };
   addMessage(message);
+
+  // Entrega push para o app fechado/em segundo plano.
+  await sendPush(getPushTokens(conversationId), character.name, text, { conversationId });
 }
 
 async function tick(): Promise<void> {

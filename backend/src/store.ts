@@ -12,10 +12,12 @@ interface DB {
   conversations: Record<string, Conversation>;
   messages: Message[];
   proactive: Record<string, ProactiveState>;
+  /** Tokens de push (Expo) por conversa. */
+  pushTokens: Record<string, string[]>;
 }
 
 function emptyDB(): DB {
-  return { characters: {}, conversations: {}, messages: [], proactive: {} };
+  return { characters: {}, conversations: {}, messages: [], proactive: {}, pushTokens: {} };
 }
 
 function load(): DB {
@@ -74,4 +76,16 @@ export function getProactiveState(conversationId: string): ProactiveState | unde
 
 export function listProactiveStates(): ProactiveState[] {
   return Object.values(db.proactive);
+}
+
+export function addPushToken(conversationId: string, token: string): void {
+  const existing = db.pushTokens[conversationId] ?? [];
+  if (!existing.includes(token)) {
+    db.pushTokens[conversationId] = [...existing, token];
+    persist();
+  }
+}
+
+export function getPushTokens(conversationId: string): string[] {
+  return db.pushTokens[conversationId] ?? [];
 }

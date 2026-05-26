@@ -3,10 +3,21 @@ import { StatusBar } from 'expo-status-bar';
 import React, { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 import { api, GenerateResponse } from './src/api';
+import { registerForPushToken } from './src/push';
 import { ChatScreen } from './src/screens/ChatScreen';
 import { OnboardingScreen } from './src/screens/OnboardingScreen';
 import { colors } from './src/theme';
 import { Character, Message } from './src/types';
+
+// Registra o token de push no backend (best-effort, não bloqueia a UI).
+async function syncPushToken(conversationId: string) {
+  try {
+    const token = await registerForPushToken();
+    if (token) await api.registerPushToken(conversationId, token);
+  } catch {
+    // sem push: o app continua funcionando com polling em primeiro plano
+  }
+}
 
 const STORAGE_CONVERSATION = 'talky.conversationId';
 const STORAGE_USERNAME = 'talky.userName';
@@ -43,6 +54,7 @@ export default function App() {
         messages: data.messages,
         userName,
       });
+      void syncPushToken(conversationId);
     } catch (e) {
       setScreen({
         kind: 'error',
@@ -69,6 +81,7 @@ export default function App() {
       messages: result.messages,
       userName,
     });
+    void syncPushToken(result.conversation.id);
   }, []);
 
   const handleReset = useCallback(async () => {

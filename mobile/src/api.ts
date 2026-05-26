@@ -78,4 +78,12 @@ export const api = {
       `/api/conversations/${conversationId}/messages${query}`,
     );
   },
+
+  // Registra o token de push para receber mensagens proativas com o app fechado.
+  registerPushToken(conversationId: string, token: string): Promise<{ ok: boolean }> {
+    return request<{ ok: boolean }>(`/api/conversations/${conversationId}/push-token`, {
+      method: 'POST',
+      body: JSON.stringify({ token }),
+    });
+  },
 };

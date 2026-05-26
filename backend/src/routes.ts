@@ -5,6 +5,7 @@ import { INTRO_DIRECTIVE } from './prompts';
 import { initProactiveForConversation, touchProactive } from './scheduler';
 import {
   addMessage,
+  addPushToken,
   getCharacter,
   getConversation,
   getMessages,
@@ -87,6 +88,22 @@ router.get('/conversations/:id/messages', (req, res) => {
     messages = messages.filter((m) => m.createdAt > after);
   }
   res.json({ messages });
+});
+
+// Registra um token de push (Expo) para receber mensagens proativas.
+router.post('/conversations/:id/push-token', (req, res) => {
+  const conversation = getConversation(req.params.id);
+  if (!conversation) {
+    res.status(404).json({ error: 'Conversa não encontrada.' });
+    return;
+  }
+  const { token } = req.body ?? {};
+  if (!token || typeof token !== 'string') {
+    res.status(400).json({ error: 'Token ausente.' });
+    return;
+  }
+  addPushToken(conversation.id, token);
+  res.json({ ok: true });
 });
 
 // Envia uma mensagem do usuário e devolve a(s) resposta(s) do personagem.
