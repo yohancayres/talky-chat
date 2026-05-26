@@ -3,7 +3,13 @@ import { Router } from 'express';
 import { generateAppearance, generateCharacter, generateReply } from './ai';
 import { computeReplyDueAt } from './availability';
 import { config } from './config';
-import { deleteAvatar, generateAvatar } from './image';
+import {
+  clearAvatarGenerating,
+  deleteAvatar,
+  generateAvatar,
+  isGeneratingAvatar,
+  markAvatarGenerating,
+} from './image';
 import { INTRO_DIRECTIVE } from './prompts';
 import {
   getConversationStatus,
@@ -120,45 +126,54 @@ router.get('/conversations/:id', (req, res) => {
 });
 
 // Gera (ou troca) a foto de perfil do personagem. Sem foto => cria do zero;
-// com foto => mantém as feições, mas em outro cenário/ângulo.
-router.post('/characters/:id/avatar', async (req, res) => {
-  try {
-    let character = getCharacter(req.params.id);
-    if (!character) {
-      res.status(404).json({ error: 'Personagem não encontrado.' });
-      return;
-    }
-    if (!config.image.enabled || !config.openaiApiKey) {
-      res.status(503).json({ error: 'Geração de imagem indisponível no servidor.' });
-      return;
-    }
-
-    // Garante uma descrição física para manter as feições ao trocar a foto.
-    if (!character.appearance || !character.appearance.trim()) {
-      const appearance = await generateAppearance(character);
-      if (appearance) {
-        character = { ...character, appearance };
-        saveCharacter(character);
-      }
-    }
-
-    const variation = Boolean(character.photoUrl);
-    const previous = character.photoUrl;
-    const photoUrl = await generateAvatar(character, { variation });
-    if (!photoUrl) {
-      res.status(502).json({ error: 'Não foi possível gerar a foto agora.' });
-      return;
-    }
-
-    character = { ...character, photoUrl };
-    saveCharacter(character);
-    if (previous && previous !== photoUrl) deleteAvatar(previous);
-
-    res.json({ character });
-  } catch (err) {
-    console.error('[talky] erro ao gerar foto de perfil:', err);
-    res.status(500).json({ error: messageOf(err) });
+// com foto => mantém as feições, mas em outro cenário/ângulo. A geração roda em
+// segundo plano (pode levar minutos); o app recebe a foto nova via polling.
+router.post('/characters/:id/avatar', (req, res) => {
+  const character = getCharacter(req.params.id);
+  if (!character) {
+    res.status(404).json({ error: 'Personagem não encontrado.' });
+    return;
   }
+  if (!config.image.enabled || !config.openaiApiKey) {
+    res.status(503).json({ error: 'Geração de imagem indisponível no servidor.' });
+    return;
+  }
+  if (isGeneratingAvatar(character.id)) {
+    res.status(202).json({ status: 'generating' });
+    return;
+  }
+
+  markAvatarGenerating(character.id);
+  res.status(202).json({ status: 'generating' });
+
+  // Segundo plano — não bloqueia a resposta.
+  void (async () => {
+    try {
+      let current = getCharacter(character.id);
+      if (!current) return;
+
+      // Garante uma descrição física para manter as feições ao trocar a foto.
+      if (!current.appearance || !current.appearance.trim()) {
+        const appearance = await generateAppearance(current);
+        if (appearance) {
+          current = { ...current, appearance };
+          saveCharacter(current);
+        }
+      }
+
+      const variation = Boolean(current.photoUrl);
+      const previous = current.photoUrl;
+      const photoUrl = await generateAvatar(current, { variation });
+      if (photoUrl) {
+        saveCharacter({ ...getCharacter(current.id)!, photoUrl });
+        if (previous && previous !== photoUrl) deleteAvatar(previous);
+      }
+    } catch (err) {
+      console.error('[talky] erro ao gerar foto de perfil:', err);
+    } finally {
+      clearAvatarGenerating(character.id);
+    }
+  })();
 });
 
 // Define/limpa o status do usuário (ex: "em reunião"). Vira contexto pro personagem.

@@ -13,8 +13,9 @@ export const config = {
     model: process.env.TALKY_IMAGE_MODEL ?? 'gpt-image-2',
     size: process.env.TALKY_IMAGE_SIZE ?? '1024x1024',
     endpoint: process.env.OPENAI_IMAGE_ENDPOINT ?? 'https://api.openai.com/v1/images/generations',
-    // Tempo máximo de espera pela geração da imagem (segundos).
-    timeoutSeconds: Number(process.env.IMAGE_TIMEOUT_SECONDS ?? 90),
+    // Tempo máximo de espera pela geração da imagem (segundos). Geração roda em
+    // segundo plano, então pode ser generoso (imagens podem levar minutos).
+    timeoutSeconds: Number(process.env.IMAGE_TIMEOUT_SECONDS ?? 240),
   },
   proactive: {
     // O personagem manda mensagens sozinho quando a conversa fica em silêncio.

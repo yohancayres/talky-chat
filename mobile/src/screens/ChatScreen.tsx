@@ -97,6 +97,13 @@ export function ChatScreen({
         const res = await api.getNewMessages(conversationId, lastSyncRef.current);
         if (!active) return;
         setStatus(res.status);
+        // Foto de perfil pode ter sido (re)gerada em segundo plano.
+        setRegeneratingPhoto(Boolean(res.status.avatarGenerating));
+        if (res.status.photoUrl) {
+          setCharacter((prev) =>
+            prev.photoUrl === res.status.photoUrl ? prev : { ...prev, photoUrl: res.status.photoUrl },
+          );
+        }
         if (res.messages.length > 0) {
           mergeIncoming(res.messages);
           scrollToEnd();
@@ -162,14 +169,12 @@ export function ChatScreen({
 
   async function handleRegeneratePhoto() {
     if (regeneratingPhoto) return;
-    setRegeneratingPhoto(true);
+    setRegeneratingPhoto(true); // feedback imediato; o polling confirma quando termina
     try {
-      const res = await api.regenerateAvatar(character.id);
-      setCharacter(res.character);
+      await api.regenerateAvatar(character.id);
     } catch (e) {
-      Alert.alert('Foto de perfil', e instanceof Error ? e.message : 'Não foi possível gerar a foto.');
-    } finally {
       setRegeneratingPhoto(false);
+      Alert.alert('Foto de perfil', e instanceof Error ? e.message : 'Não foi possível gerar a foto.');
     }
   }
 

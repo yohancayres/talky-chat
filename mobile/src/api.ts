@@ -104,13 +104,12 @@ export const api = {
     });
   },
 
-  // Gera ou troca a foto de perfil do personagem (pode levar dezenas de segundos).
-  regenerateAvatar(characterId: string): Promise<{ character: Character }> {
-    return request<{ character: Character }>(
-      `/api/characters/${characterId}/avatar`,
-      { method: 'POST' },
-      120_000,
-    );
+  // Dispara a geração da foto (roda em segundo plano; retorna na hora). A foto
+  // nova chega via polling (status.photoUrl / status.avatarGenerating).
+  regenerateAvatar(characterId: string): Promise<{ status: string }> {
+    return request<{ status: string }>(`/api/characters/${characterId}/avatar`, {
+      method: 'POST',
+    });
   },
 
   // Define o status do usuário (string vazia = disponível/limpar).

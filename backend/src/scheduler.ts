@@ -2,6 +2,7 @@ import { randomUUID } from 'crypto';
 import { generateNewsMessage, generateProactiveMessage, generateReply } from './ai';
 import { currentPresence } from './availability';
 import { config } from './config';
+import { isGeneratingAvatar } from './image';
 import { sendPush } from './push';
 import {
   addMessage,
@@ -215,12 +216,16 @@ export interface ConversationStatus {
   activity: string;
   /** Resposta prestes a chegar — o app mostra "digitando...". */
   typing: boolean;
+  /** Foto de perfil atual do personagem (pode ter mudado). */
+  photoUrl?: string;
+  /** Foto de perfil sendo gerada agora. */
+  avatarGenerating: boolean;
 }
 
 export function getConversationStatus(conversationId: string): ConversationStatus {
   const conversation = getConversation(conversationId);
   const character = conversation && getCharacter(conversation.characterIds[0]);
-  if (!character) return { state: 'online', activity: '', typing: false };
+  if (!character) return { state: 'online', activity: '', typing: false, avatarGenerating: false };
 
   const now = new Date();
   const presence = currentPresence(character, now);
@@ -230,7 +235,13 @@ export function getConversationStatus(conversationId: string): ConversationStatu
     presence.state !== 'sleeping' &&
     new Date(pending.dueAt).getTime() - now.getTime() <= config.reply.typingWindowSeconds * 1000;
 
-  return { state: presence.state, activity: presence.activity, typing };
+  return {
+    state: presence.state,
+    activity: presence.activity,
+    typing,
+    photoUrl: character.photoUrl,
+    avatarGenerating: isGeneratingAvatar(character.id),
+  };
 }
 
 export function startScheduler(): void {

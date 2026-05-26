@@ -6,6 +6,21 @@ import { describeTemperament } from './prompts';
 
 export const AVATARS_DIR = path.join(__dirname, '..', 'data', 'avatars');
 
+// Personagens com foto sendo gerada agora (estado em memória).
+const generatingAvatars = new Set<string>();
+
+export function isGeneratingAvatar(characterId: string): boolean {
+  return generatingAvatars.has(characterId);
+}
+
+export function markAvatarGenerating(characterId: string): void {
+  generatingAvatars.add(characterId);
+}
+
+export function clearAvatarGenerating(characterId: string): void {
+  generatingAvatars.delete(characterId);
+}
+
 const SCENES = [
   'in a cozy café',
   'outdoors in a park',

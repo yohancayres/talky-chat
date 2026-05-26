@@ -55,4 +55,6 @@ export interface ChatStatus {
   state: 'online' | 'busy' | 'sleeping';
   activity: string;
   typing: boolean;
+  photoUrl?: string;
+  avatarGenerating?: boolean;
 }
