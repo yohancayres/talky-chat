@@ -1,10 +1,11 @@
 import React, { useEffect, useState } from 'react';
 import { Image, StyleSheet, Text, View } from 'react-native';
 import { api } from '../api';
-import { Character } from '../types';
+
+type AvatarLike = { photoUrl?: string; avatar: { emoji: string; color: string } };
 
 // Mostra a foto de perfil do personagem; se não houver (ou falhar), cai no emoji.
-export function Avatar({ character, size }: { character: Character; size: number }) {
+export function Avatar({ character, size }: { character: AvatarLike; size: number }) {
   const [failed, setFailed] = useState(false);
   const uri = character.photoUrl ? `${api.baseUrl}${character.photoUrl}` : null;
   const radius = size / 2;

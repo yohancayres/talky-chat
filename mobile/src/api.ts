@@ -1,4 +1,4 @@
-import { Character, ChatStatus, Conversation, Message } from './types';
+import { Character, ChatStatus, Conversation, ConversationSummary, Message } from './types';
 
 // Em emulador iOS / web, localhost funciona. Em um celular físico, troque por
 // http://SEU_IP_LOCAL:3000 definindo EXPO_PUBLIC_API_URL antes de rodar o app.
@@ -63,15 +63,37 @@ export interface MessagesResponse {
 export const api = {
   baseUrl: BASE_URL,
 
-  generateCharacter(hint: string, userName: string): Promise<GenerateResponse> {
+  generateCharacter(hint: string, userName: string, userId: string): Promise<GenerateResponse> {
     return request<GenerateResponse>('/api/characters/generate', {
       method: 'POST',
-      body: JSON.stringify({ hint, userName }),
+      body: JSON.stringify({ hint, userName, userId }),
     });
   },
 
   getConversation(id: string): Promise<ConversationResponse> {
     return request<ConversationResponse>(`/api/conversations/${id}`);
+  },
+
+  // Lista as conversas do usuário (tela de conversas).
+  getConversations(userId: string): Promise<{ conversations: ConversationSummary[] }> {
+    return request<{ conversations: ConversationSummary[] }>(
+      `/api/users/${userId}/conversations`,
+    );
+  },
+
+  // Marca uma conversa como lida.
+  markRead(conversationId: string): Promise<{ ok: boolean }> {
+    return request<{ ok: boolean }>(`/api/conversations/${conversationId}/read`, {
+      method: 'POST',
+    });
+  },
+
+  // Associa uma conversa antiga (chat único) ao usuário atual.
+  claimConversation(conversationId: string, userId: string): Promise<{ ok: boolean }> {
+    return request<{ ok: boolean }>(`/api/conversations/${conversationId}/claim`, {
+      method: 'POST',
+      body: JSON.stringify({ userId }),
+    });
   },
 
   sendMessage(

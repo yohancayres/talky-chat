@@ -44,6 +44,7 @@ export function ChatScreen({
   userName,
   initialStatus,
   initialUserStatus,
+  onBack,
   onReset,
 }: {
   conversationId: string;
@@ -52,6 +53,7 @@ export function ChatScreen({
   userName: string;
   initialStatus?: ChatStatus | null;
   initialUserStatus?: string;
+  onBack: () => void;
   onReset: () => void;
 }) {
   const [character, setCharacter] = useState<Character>(initialCharacter);
@@ -67,6 +69,11 @@ export function ChatScreen({
   const lastSyncRef = useRef<string>(
     initialMessages.length ? initialMessages[initialMessages.length - 1].createdAt : '',
   );
+
+  // Ao abrir a conversa, marca como lida.
+  useEffect(() => {
+    api.markRead(conversationId).catch(() => {});
+  }, [conversationId]);
 
   const scrollToEnd = useCallback(() => {
     requestAnimationFrame(() => listRef.current?.scrollToEnd({ animated: true }));
@@ -107,6 +114,8 @@ export function ChatScreen({
         if (res.messages.length > 0) {
           mergeIncoming(res.messages);
           scrollToEnd();
+          // Está com a conversa aberta: marca como lida.
+          api.markRead(conversationId).catch(() => {});
         }
       } catch {
         // silencioso: tenta de novo no próximo ciclo
@@ -195,20 +204,25 @@ export function ChatScreen({
       style={styles.container}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
-      <Pressable style={styles.header} onPress={() => setProfileOpen(true)}>
-        <View style={styles.headerAvatar}>
-          <Avatar character={character} size={40} />
-        </View>
-        <View style={styles.headerInfo}>
+      <View style={styles.header}>
+        <Pressable onPress={onBack} hitSlop={12} style={styles.backButton}>
+          <Text style={styles.backIcon}>‹</Text>
+        </Pressable>
+        <Pressable style={styles.headerMain} onPress={() => setProfileOpen(true)}>
+          <View style={styles.headerAvatar}>
+            <Avatar character={character} size={40} />
+          </View>
+          <View style={styles.headerInfo}>
           <Text style={styles.headerName}>{character.name}</Text>
-          <Text
-            style={[styles.headerSubtitle, isTyping && styles.headerTyping]}
-            numberOfLines={1}
-          >
-            {characterStatusLabel(status, character)}
-          </Text>
-        </View>
-      </Pressable>
+            <Text
+              style={[styles.headerSubtitle, isTyping && styles.headerTyping]}
+              numberOfLines={1}
+            >
+              {characterStatusLabel(status, character)}
+            </Text>
+          </View>
+        </Pressable>
+      </View>
 
       <View style={styles.userStatusBar}>
         <Text style={styles.userStatusLabel}>Seu status:</Text>
@@ -283,11 +297,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingTop: 52,
     paddingBottom: 12,
-    paddingHorizontal: 16,
+    paddingHorizontal: 12,
     backgroundColor: colors.surface,
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
   },
+  backButton: { paddingHorizontal: 4, paddingRight: 6 },
+  backIcon: { fontSize: 34, color: colors.accent, lineHeight: 36, marginTop: -4 },
+  headerMain: { flex: 1, flexDirection: 'row', alignItems: 'center' },
   headerAvatar: { marginRight: 12 },
   headerInfo: { flex: 1 },
   headerName: { fontSize: 17, fontWeight: '700', color: colors.text },

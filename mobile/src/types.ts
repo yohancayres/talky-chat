@@ -58,3 +58,16 @@ export interface ChatStatus {
   photoUrl?: string;
   avatarGenerating?: boolean;
 }
+
+/** Resumo de uma conversa para a tela de lista. */
+export interface ConversationSummary {
+  conversation: { id: string; title: string };
+  character: {
+    id: string;
+    name: string;
+    avatar: { emoji: string; color: string };
+    photoUrl?: string;
+  } | null;
+  lastMessage: { text: string; role: SenderRole; createdAt: string } | null;
+  unread: number;
+}

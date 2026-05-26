@@ -5,9 +5,11 @@ import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-nati
 import { api, GenerateResponse } from './src/api';
 import { registerForPushToken } from './src/push';
 import { ChatScreen } from './src/screens/ChatScreen';
+import { ConversationListScreen } from './src/screens/ConversationListScreen';
 import { OnboardingScreen } from './src/screens/OnboardingScreen';
 import { colors } from './src/theme';
 import { Character, ChatStatus, Message } from './src/types';
+import { uuid } from './src/uuid';
 
 // Registra o token de push no backend (best-effort, não bloqueia a UI).
 async function syncPushToken(conversationId: string) {
@@ -19,52 +21,60 @@ async function syncPushToken(conversationId: string) {
   }
 }
 
-const STORAGE_CONVERSATION = 'talky.conversationId';
+const STORAGE_USERID = 'talky.userId';
 const STORAGE_USERNAME = 'talky.userName';
+const STORAGE_CONVERSATION = 'talky.conversationId'; // legado (chat único)
+
+async function getOrCreateUserId(): Promise<string> {
+  let id = await AsyncStorage.getItem(STORAGE_USERID);
+  if (!id) {
+    id = uuid();
+    await AsyncStorage.setItem(STORAGE_USERID, id);
+  }
+  return id;
+}
 
 type Screen =
   | { kind: 'booting' }
   | { kind: 'onboarding' }
+  | { kind: 'newContact' }
+  | { kind: 'list' }
   | { kind: 'error'; message: string }
   | {
       kind: 'chat';
       conversationId: string;
       character: Character;
       messages: Message[];
-      userName: string;
       status?: ChatStatus | null;
       userStatus?: string;
     };
 
 export default function App() {
   const [screen, setScreen] = useState<Screen>({ kind: 'booting' });
+  const [userId, setUserId] = useState<string>('');
+  const [userName, setUserName] = useState<string>('');
 
   const boot = useCallback(async () => {
     setScreen({ kind: 'booting' });
     try {
-      const conversationId = await AsyncStorage.getItem(STORAGE_CONVERSATION);
-      const userName = (await AsyncStorage.getItem(STORAGE_USERNAME)) ?? '';
-      if (!conversationId) {
-        setScreen({ kind: 'onboarding' });
-        return;
+      const uid = await getOrCreateUserId();
+      setUserId(uid);
+      const name = (await AsyncStorage.getItem(STORAGE_USERNAME)) ?? '';
+      setUserName(name);
+
+      // Migração: associa o chat único antigo a este usuário.
+      const legacyConv = await AsyncStorage.getItem(STORAGE_CONVERSATION);
+      if (legacyConv) {
+        try {
+          await api.claimConversation(legacyConv, uid);
+        } catch {
+          // ignora; segue para a listagem
+        }
+        await AsyncStorage.removeItem(STORAGE_CONVERSATION);
       }
-      const data = await api.getConversation(conversationId);
-      const character = data.characters[0];
-      if (!character) {
-        await clearStorage();
-        setScreen({ kind: 'onboarding' });
-        return;
-      }
-      setScreen({
-        kind: 'chat',
-        conversationId,
-        character,
-        messages: data.messages,
-        userName,
-        status: data.status,
-        userStatus: data.conversation.userStatus,
-      });
-      void syncPushToken(conversationId);
+
+      const res = await api.getConversations(uid);
+      setScreen({ kind: res.conversations.length === 0 ? 'onboarding' : 'list' });
     } catch (e) {
       setScreen({
         kind: 'error',
@@ -77,27 +87,52 @@ export default function App() {
     boot();
   }, [boot]);
 
-  async function clearStorage() {
-    await AsyncStorage.multiRemove([STORAGE_CONVERSATION, STORAGE_USERNAME]);
-  }
+  const openConversation = useCallback(async (conversationId: string) => {
+    setScreen({ kind: 'booting' });
+    try {
+      const data = await api.getConversation(conversationId);
+      const character = data.characters[0];
+      if (!character) {
+        setScreen({ kind: 'list' });
+        return;
+      }
+      api.markRead(conversationId).catch(() => {});
+      setScreen({
+        kind: 'chat',
+        conversationId,
+        character,
+        messages: data.messages,
+        status: data.status,
+        userStatus: data.conversation.userStatus,
+      });
+      void syncPushToken(conversationId);
+    } catch (e) {
+      setScreen({
+        kind: 'error',
+        message: e instanceof Error ? e.message : 'Não foi possível abrir a conversa.',
+      });
+    }
+  }, []);
 
-  const handleCreated = useCallback(async (result: GenerateResponse, userName: string) => {
-    await AsyncStorage.setItem(STORAGE_CONVERSATION, result.conversation.id);
-    await AsyncStorage.setItem(STORAGE_USERNAME, userName);
+  const handleCreated = useCallback(async (result: GenerateResponse, name: string) => {
+    if (name) {
+      await AsyncStorage.setItem(STORAGE_USERNAME, name);
+      setUserName(name);
+    }
+    api.markRead(result.conversation.id).catch(() => {});
     setScreen({
       kind: 'chat',
       conversationId: result.conversation.id,
       character: result.character,
       messages: result.messages,
-      userName,
     });
     void syncPushToken(result.conversation.id);
   }, []);
 
   const handleReset = useCallback(async () => {
-    await clearStorage();
-    setScreen({ kind: 'onboarding' });
-  }, []);
+    await AsyncStorage.multiRemove([STORAGE_USERID, STORAGE_USERNAME, STORAGE_CONVERSATION]);
+    boot();
+  }, [boot]);
 
   return (
     <View style={styles.root}>
@@ -108,16 +143,36 @@ export default function App() {
         </View>
       )}
 
-      {screen.kind === 'onboarding' && <OnboardingScreen onCreated={handleCreated} />}
+      {screen.kind === 'onboarding' && userId !== '' && (
+        <OnboardingScreen userId={userId} onCreated={handleCreated} />
+      )}
+
+      {screen.kind === 'newContact' && userId !== '' && (
+        <OnboardingScreen
+          userId={userId}
+          existingUserName={userName}
+          onCreated={handleCreated}
+          onCancel={() => setScreen({ kind: 'list' })}
+        />
+      )}
+
+      {screen.kind === 'list' && userId !== '' && (
+        <ConversationListScreen
+          userId={userId}
+          onOpen={openConversation}
+          onNewContact={() => setScreen({ kind: 'newContact' })}
+        />
+      )}
 
       {screen.kind === 'chat' && (
         <ChatScreen
           conversationId={screen.conversationId}
           character={screen.character}
           initialMessages={screen.messages}
-          userName={screen.userName}
+          userName={userName}
           initialStatus={screen.status}
           initialUserStatus={screen.userStatus}
+          onBack={() => setScreen({ kind: 'list' })}
           onReset={handleReset}
         />
       )}

@@ -71,6 +71,10 @@ export function getConversation(id: string): Conversation | undefined {
   return db.conversations[id];
 }
 
+export function listConversationsByUser(userId: string): Conversation[] {
+  return Object.values(db.conversations).filter((c) => c.userId === userId);
+}
+
 export function addMessage(message: Message): void {
   db.messages.push(message);
   persist();

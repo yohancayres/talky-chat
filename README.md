@@ -32,6 +32,10 @@ Este repositório contém a **primeira entrega**: o loop principal funcionando.
 - **Foto de perfil gerada por IA:** ao criar o personagem, o backend resume as
   características dele e pede uma foto de perfil realista à API de imagens da
   OpenAI (`gpt-image-2`). É opcional — sem `OPENAI_API_KEY`, usa o avatar de emoji.
+- **Múltiplas conversas:** tela de lista (estilo mensageiro) com prévia da última
+  mensagem, horário e badge de não lidos. Começa com uma conversa; o botão "+"
+  permite conhecer novos contatos. Cada conversa pertence a um usuário (userId),
+  base para personagens entrarem em contato no futuro.
 
 > Funcionalidades da visão completa que ainda **não** estão aqui (ver Roadmap):
 > múltiplos personagens conversando entre si no mesmo grupo, e personagens
@@ -110,8 +114,9 @@ Abra no Expo Go (escaneando o QR code) ou pressione `i`/`a` para emulador.
 2. Cada mensagem sua vai para `POST /api/conversations/:id/messages`. O backend
    monta um *system prompt* com a persona + história + rotina do personagem,
    anexa o histórico da conversa e pede a resposta ao Claude.
-3. O `conversationId` fica salvo no celular (AsyncStorage), então a conversa
-   continua a cada vez que você abre o app.
+3. O app guarda um `userId` no celular (AsyncStorage) e lista suas conversas pelo
+   backend (`GET /api/users/:userId/conversations`), então tudo continua a cada
+   vez que você abre o app — e abre espaço para novas conversas surgirem.
 
 ## Mensagens proativas
 
@@ -253,6 +258,9 @@ Isso resolve também a geração de foto para personagens **já criados**.
 | `POST` | `/api/conversations/:id/push-token` | Registra um token de push (Expo).            |
 | `POST` | `/api/conversations/:id/user-status` | Define o status do usuário (contexto pro personagem). |
 | `POST` | `/api/characters/:id/avatar`        | Gera/troca a foto de perfil do personagem.   |
+| `GET`  | `/api/users/:userId/conversations`  | Lista as conversas do usuário (prévia + não lidos). |
+| `POST` | `/api/conversations/:id/read`       | Marca a conversa como lida.                  |
+| `POST` | `/api/conversations/:id/claim`      | Associa uma conversa a um usuário.           |
 
 ## Roadmap (visão completa)
 
@@ -275,6 +283,10 @@ A modelagem de dados já foi pensada para suportar grupos com vários personagen
       encontrar personagens já existentes (`CHARACTER_POOL_REUSE_CHANCE`).
 - [x] **Foto de perfil por IA:** foto realista gerada a partir das
       características do personagem (OpenAI `gpt-image-2`), com fallback no emoji.
+- [x] **Múltiplas conversas:** tela de lista com não lidos, navegação lista ↔
+      chat e botão "+" para novos contatos; conversas pertencem a um `userId`.
+- [ ] **Personagem inicia o contato:** com a base de `userId` + lista, um
+      personagem (global) pode abrir uma conversa nova com o usuário sozinho.
 - [ ] **Acontecimentos na vida do personagem:** evoluir a linha do tempo ao
       longo do tempo (eventos novos, mudanças de humor, fatos do dia a dia).
 - [ ] **Múltiplos personagens:** introduzir novos personagens de forma orgânica

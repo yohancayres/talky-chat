@@ -21,11 +21,19 @@ const LOADING_LINES = [
 ];
 
 export function OnboardingScreen({
+  userId,
+  existingUserName,
   onCreated,
+  onCancel,
 }: {
+  userId: string;
+  // Quando fornecido, é um "novo contato": não pergunta o nome de novo.
+  existingUserName?: string;
   onCreated: (result: GenerateResponse, userName: string) => void;
+  onCancel?: () => void;
 }) {
-  const [name, setName] = useState('');
+  const isNewContact = Boolean(existingUserName);
+  const [name, setName] = useState(existingUserName ?? '');
   const [hint, setHint] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -40,7 +48,7 @@ export function OnboardingScreen({
     }, 2200);
 
     try {
-      const result = await api.generateCharacter(hint.trim(), name.trim());
+      const result = await api.generateCharacter(hint.trim(), name.trim(), userId);
       onCreated(result, name.trim());
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Não foi possível criar o personagem.');
@@ -67,23 +75,26 @@ export function OnboardingScreen({
     >
       <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
         <Text style={styles.logoEmoji}>💬</Text>
-        <Text style={styles.title}>Talky</Text>
+        <Text style={styles.title}>{isNewContact ? 'Novo contato' : 'Talky'}</Text>
         <Text style={styles.tagline}>
-          Um amigo de IA com história, rotina e vida própria. Você pode criar um
-          novo personagem ou esbarrar com alguém que já existe no Talky.
+          {isNewContact
+            ? 'Conheça mais alguém no Talky — um novo personagem ou alguém que já existe por aqui.'
+            : 'Um amigo de IA com história, rotina e vida própria. Você pode criar um novo personagem ou esbarrar com alguém que já existe no Talky.'}
         </Text>
 
-        <View style={styles.field}>
-          <Text style={styles.label}>Como você quer ser chamado?</Text>
-          <TextInput
-            style={styles.input}
-            placeholder="Seu nome ou apelido"
-            placeholderTextColor={colors.muted}
-            value={name}
-            onChangeText={setName}
-            returnKeyType="next"
-          />
-        </View>
+        {!isNewContact && (
+          <View style={styles.field}>
+            <Text style={styles.label}>Como você quer ser chamado?</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="Seu nome ou apelido"
+              placeholderTextColor={colors.muted}
+              value={name}
+              onChangeText={setName}
+              returnKeyType="next"
+            />
+          </View>
+        )}
 
         <View style={styles.field}>
           <Text style={styles.label}>Que tipo de personagem? (opcional)</Text>
@@ -106,8 +117,16 @@ export function OnboardingScreen({
           style={({ pressed }) => [styles.button, pressed && styles.buttonPressed]}
           onPress={handleCreate}
         >
-          <Text style={styles.buttonText}>Conhecer meu personagem</Text>
+          <Text style={styles.buttonText}>
+            {isNewContact ? 'Conhecer contato' : 'Conhecer meu personagem'}
+          </Text>
         </Pressable>
+
+        {onCancel && (
+          <Pressable style={styles.cancel} onPress={onCancel}>
+            <Text style={styles.cancelText}>Voltar</Text>
+          </Pressable>
+        )}
       </ScrollView>
     </KeyboardAvoidingView>
   );
@@ -163,5 +182,7 @@ const styles = StyleSheet.create({
   },
   buttonPressed: { backgroundColor: colors.accentDark },
   buttonText: { color: '#FFFFFF', fontSize: 17, fontWeight: '700' },
+  cancel: { marginTop: 18, alignItems: 'center' },
+  cancelText: { color: colors.muted, fontSize: 15 },
   loadingText: { fontSize: 17, color: colors.text, textAlign: 'center' },
 });

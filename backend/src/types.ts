@@ -76,8 +76,12 @@ export interface Conversation {
   characterIds: string[];
   /** Nome de quem conversa — usado nas mensagens proativas. */
   userName?: string;
+  /** Dono da conversa (identidade do dispositivo/usuário). */
+  userId?: string;
   /** Status definido pelo usuário (ex: "em reunião") — vira contexto pro personagem. */
   userStatus?: string;
+  /** Quando o usuário leu a conversa pela última vez (para contagem de não lidos). */
+  lastReadAt?: string;
   createdAt: string;
 }
 

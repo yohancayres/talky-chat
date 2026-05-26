@@ -171,7 +171,7 @@ export function CharacterProfileModal({
           )}
 
           <Pressable style={styles.resetButton} onPress={onReset}>
-            <Text style={styles.resetText}>Recomeçar com outro personagem</Text>
+            <Text style={styles.resetText}>Recomeçar do zero (apagar tudo)</Text>
           </Pressable>
         </ScrollView>
       </View>

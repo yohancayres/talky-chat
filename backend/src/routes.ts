@@ -27,6 +27,7 @@ import {
   getUserActivity,
   hasPendingReply,
   listCharacters,
+  listConversationsByUser,
   saveCharacter,
   saveConversation,
 } from './store';
@@ -79,11 +80,14 @@ router.post('/characters/generate', async (req, res) => {
     // mais abaixo). Personagem reusado já traz a foto (se tiver).
     const needsPhoto = !existing && !character.photoUrl;
 
+    const { userId } = req.body ?? {};
     const conversation: Conversation = {
       id: randomUUID(),
       title: character.name,
       characterIds: [character.id],
       userName: typeof userName === 'string' ? userName.trim() : undefined,
+      userId: typeof userId === 'string' ? userId : undefined,
+      lastReadAt: new Date().toISOString(),
       createdAt: new Date().toISOString(),
     };
     saveConversation(conversation);
@@ -123,6 +127,68 @@ router.get('/conversations/:id', (req, res) => {
     .filter((c): c is Character => Boolean(c));
   const messages = getMessages(conversation.id);
   res.json({ conversation, characters, messages, status: getConversationStatus(conversation.id) });
+});
+
+// Lista as conversas de um usuário (tela de conversas), com prévia e não lidos.
+router.get('/users/:userId/conversations', (req, res) => {
+  const items = listConversationsByUser(req.params.userId)
+    .map((conv) => {
+      const character = getCharacter(conv.characterIds[0]);
+      const messages = getMessages(conv.id);
+      const last = messages[messages.length - 1];
+      const lastReadAt = conv.lastReadAt ?? '';
+      const unread = messages.filter(
+        (m) => m.role === 'character' && m.createdAt > lastReadAt,
+      ).length;
+      return {
+        conversation: { id: conv.id, title: conv.title },
+        character: character
+          ? {
+              id: character.id,
+              name: character.name,
+              avatar: character.avatar,
+              photoUrl: character.photoUrl,
+            }
+          : null,
+        lastMessage: last
+          ? { text: last.text, role: last.role, createdAt: last.createdAt }
+          : null,
+        unread,
+      };
+    })
+    .sort((a, b) =>
+      (b.lastMessage?.createdAt ?? '').localeCompare(a.lastMessage?.createdAt ?? ''),
+    );
+  res.json({ conversations: items });
+});
+
+// Marca a conversa como lida (zera os não lidos).
+router.post('/conversations/:id/read', (req, res) => {
+  const conversation = getConversation(req.params.id);
+  if (!conversation) {
+    res.status(404).json({ error: 'Conversa não encontrada.' });
+    return;
+  }
+  saveConversation({ ...conversation, lastReadAt: new Date().toISOString() });
+  res.json({ ok: true });
+});
+
+// Associa uma conversa sem dono a um usuário (migração do chat único antigo).
+router.post('/conversations/:id/claim', (req, res) => {
+  const conversation = getConversation(req.params.id);
+  if (!conversation) {
+    res.status(404).json({ error: 'Conversa não encontrada.' });
+    return;
+  }
+  const { userId } = req.body ?? {};
+  if (typeof userId !== 'string' || !userId) {
+    res.status(400).json({ error: 'userId ausente.' });
+    return;
+  }
+  if (!conversation.userId) {
+    saveConversation({ ...conversation, userId });
+  }
+  res.json({ ok: true });
 });
 
 // Gera (ou troca) a foto de perfil do personagem. Sem foto => cria do zero;
