@@ -1,5 +1,6 @@
 import { randomUUID } from 'crypto';
-import { generateNewsMessage, generateProactiveMessage } from './ai';
+import { generateNewsMessage, generateProactiveMessage, generateReply } from './ai';
+import { currentPresence } from './availability';
 import { config } from './config';
 import { sendPush } from './push';
 import {
@@ -7,11 +8,15 @@ import {
   getCharacter,
   getConversation,
   getMessages,
+  getPendingReply,
   getPushTokens,
+  hasPendingReply,
+  listPendingReplies,
   listProactiveStates,
+  removePendingReply,
   setProactiveState,
 } from './store';
-import { Message } from './types';
+import { Message, PendingReply } from './types';
 
 const P = config.proactive;
 
@@ -91,9 +96,10 @@ async function fireProactive(conversationId: string, now: Date): Promise<void> {
     character.interests.length > 0 &&
     Math.random() < config.webSearch.newsChance;
 
+  const ctx = { userName: conversation.userName, userStatus: conversation.userStatus };
   const text = useNews
-    ? await generateNewsMessage(character, history, conversation.userName, now)
-    : await generateProactiveMessage(character, history, conversation.userName, now, last?.createdAt);
+    ? await generateNewsMessage(character, history, now, ctx)
+    : await generateProactiveMessage(character, history, now, { ...ctx, lastMessageAt: last?.createdAt });
   if (!text.trim()) return;
 
   const message: Message = {
@@ -126,6 +132,12 @@ async function tick(): Promise<void> {
       continue;
     }
 
+    // Já existe uma resposta a caminho: não interromper com mensagem proativa.
+    if (hasPendingReply(state.conversationId)) {
+      setProactiveState({ ...state, nextAt: scheduleNext(now) });
+      continue;
+    }
+
     const messages = getMessages(state.conversationId);
     // Não acumular mensagens sem resposta: pausa até o usuário responder.
     if (trailingCharacterCount(messages) >= P.maxConsecutive) {
@@ -143,15 +155,102 @@ async function tick(): Promise<void> {
   }
 }
 
-export function startScheduler(): void {
-  if (!P.enabled) {
-    console.log('[talky] mensagens proativas desativadas (PROACTIVE_ENABLED=false).');
-    return;
+// ---------------------------------------------------------------------------
+// Respostas com atraso humano
+// ---------------------------------------------------------------------------
+
+const inProgressReplies = new Set<string>();
+
+async function deliverReply(pending: PendingReply): Promise<void> {
+  try {
+    const conversation = getConversation(pending.conversationId);
+    if (!conversation) return;
+    const character = getCharacter(conversation.characterIds[0]);
+    if (!character) return;
+
+    const history = getMessages(conversation.id);
+    const text = await generateReply(character, history, {
+      userName: conversation.userName,
+      userStatus: conversation.userStatus,
+      useWebSearch: config.webSearch.enabled && config.webSearch.inReplies,
+    });
+    if (!text.trim()) return;
+
+    const message: Message = {
+      id: randomUUID(),
+      conversationId: conversation.id,
+      role: 'character',
+      senderId: character.id,
+      senderName: character.name,
+      text,
+      createdAt: new Date().toISOString(),
+    };
+    addMessage(message);
+    touchProactive(conversation.id);
+    await sendPush(getPushTokens(conversation.id), character.name, text, {
+      conversationId: conversation.id,
+    });
+  } catch (err) {
+    console.error('[talky] erro ao entregar resposta:', err);
+  } finally {
+    // Remove sempre (sucesso ou falha) para não reprocessar em loop.
+    removePendingReply(pending.id);
   }
-  console.log(
-    `[talky] agendador de mensagens proativas ativo (intervalo ${P.minGapMinutes}-${P.maxGapMinutes} min, silêncio ${P.quietHoursStart}h-${P.quietHoursEnd}h).`,
-  );
-  setInterval(() => {
-    void tick();
-  }, P.checkIntervalSeconds * 1000);
+}
+
+function processPendingReplies(): void {
+  if (!config.reply.enabled) return;
+  const now = Date.now();
+  for (const pending of listPendingReplies()) {
+    if (new Date(pending.dueAt).getTime() > now) continue;
+    if (inProgressReplies.has(pending.id)) continue;
+    inProgressReplies.add(pending.id);
+    void deliverReply(pending).finally(() => inProgressReplies.delete(pending.id));
+  }
+}
+
+export interface ConversationStatus {
+  state: 'online' | 'busy' | 'sleeping';
+  /** O que o personagem está fazendo agora (ex: "trabalhando"). */
+  activity: string;
+  /** Resposta prestes a chegar — o app mostra "digitando...". */
+  typing: boolean;
+}
+
+export function getConversationStatus(conversationId: string): ConversationStatus {
+  const conversation = getConversation(conversationId);
+  const character = conversation && getCharacter(conversation.characterIds[0]);
+  if (!character) return { state: 'online', activity: '', typing: false };
+
+  const now = new Date();
+  const presence = currentPresence(character, now);
+  const pending = getPendingReply(conversationId);
+  const typing =
+    !!pending &&
+    presence.state !== 'sleeping' &&
+    new Date(pending.dueAt).getTime() - now.getTime() <= config.reply.typingWindowSeconds * 1000;
+
+  return { state: presence.state, activity: presence.activity, typing };
+}
+
+export function startScheduler(): void {
+  if (config.reply.enabled) {
+    console.log(
+      `[talky] respostas com atraso humano ativas (fator ${config.reply.speedFactor}, teto ${config.reply.maxAwakeMinutes} min).`,
+    );
+    setInterval(() => processPendingReplies(), config.reply.checkIntervalSeconds * 1000);
+  } else {
+    console.log('[talky] respostas imediatas (REPLY_DELAY_ENABLED=false).');
+  }
+
+  if (P.enabled) {
+    console.log(
+      `[talky] agendador de mensagens proativas ativo (intervalo ${P.minGapMinutes}-${P.maxGapMinutes} min).`,
+    );
+    setInterval(() => {
+      void tick();
+    }, P.checkIntervalSeconds * 1000);
+  } else {
+    console.log('[talky] mensagens proativas desativadas (PROACTIVE_ENABLED=false).');
+  }
 }

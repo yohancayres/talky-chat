@@ -1,6 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import { Character, Conversation, Message, ProactiveState } from './types';
+import { Character, Conversation, Message, PendingReply, ProactiveState } from './types';
 
 // Persistência simples em arquivo JSON. Suficiente para o protótipo;
 // trocar por um banco de dados real quando o app crescer.
@@ -14,10 +14,22 @@ interface DB {
   proactive: Record<string, ProactiveState>;
   /** Tokens de push (Expo) por conversa. */
   pushTokens: Record<string, string[]>;
+  /** Respostas agendadas (atraso humano) aguardando geração. */
+  pendingReplies: PendingReply[];
+  /** Histograma de atividade do usuário por hora (0-23), por conversa. */
+  activity: Record<string, number[]>;
 }
 
 function emptyDB(): DB {
-  return { characters: {}, conversations: {}, messages: [], proactive: {}, pushTokens: {} };
+  return {
+    characters: {},
+    conversations: {},
+    messages: [],
+    proactive: {},
+    pushTokens: {},
+    pendingReplies: [],
+    activity: {},
+  };
 }
 
 function load(): DB {
@@ -88,4 +100,37 @@ export function addPushToken(conversationId: string, token: string): void {
 
 export function getPushTokens(conversationId: string): string[] {
   return db.pushTokens[conversationId] ?? [];
+}
+
+export function addPendingReply(reply: PendingReply): void {
+  db.pendingReplies.push(reply);
+  persist();
+}
+
+export function listPendingReplies(): PendingReply[] {
+  return db.pendingReplies;
+}
+
+export function removePendingReply(id: string): void {
+  db.pendingReplies = db.pendingReplies.filter((r) => r.id !== id);
+  persist();
+}
+
+export function hasPendingReply(conversationId: string): boolean {
+  return db.pendingReplies.some((r) => r.conversationId === conversationId);
+}
+
+export function getPendingReply(conversationId: string): PendingReply | undefined {
+  return db.pendingReplies.find((r) => r.conversationId === conversationId);
+}
+
+export function bumpUserActivity(conversationId: string, hour: number): void {
+  const hist = db.activity[conversationId] ?? new Array<number>(24).fill(0);
+  hist[hour] = (hist[hour] ?? 0) + 1;
+  db.activity[conversationId] = hist;
+  persist();
+}
+
+export function getUserActivity(conversationId: string): number[] | undefined {
+  return db.activity[conversationId];
 }

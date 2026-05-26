@@ -31,6 +31,18 @@ export const config = {
     // Permite busca também nas respostas normais (mais lento). Padrão: desligado.
     inReplies: (process.env.WEB_SEARCH_IN_REPLIES ?? 'false') === 'true',
   },
+  reply: {
+    // Respostas com atraso humano (não responde na hora). Se false, responde já.
+    enabled: (process.env.REPLY_DELAY_ENABLED ?? 'true') !== 'false',
+    // Multiplica todos os atrasos. Use baixo para testar rápido (ex: 0.05).
+    speedFactor: Number(process.env.REPLY_SPEED_FACTOR ?? 1),
+    // De quanto em quanto tempo o servidor verifica respostas pendentes (s).
+    checkIntervalSeconds: Number(process.env.REPLY_CHECK_INTERVAL_SECONDS ?? 3),
+    // Janela (s) antes da entrega em que o app mostra "digitando...".
+    typingWindowSeconds: Number(process.env.REPLY_TYPING_WINDOW_SECONDS ?? 12),
+    // Teto do atraso quando o personagem está acordado (minutos).
+    maxAwakeMinutes: Number(process.env.REPLY_MAX_AWAKE_MINUTES ?? 30),
+  },
 };
 
 if (!config.anthropicApiKey) {

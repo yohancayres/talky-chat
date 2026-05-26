@@ -18,6 +18,10 @@ Este repositório contém a **primeira entrega**: o loop principal funcionando.
 - **Notícias e cotidiano (busca na web):** parte das mensagens proativas é
   baseada em algo **real e recente** — notícias dos interesses do personagem,
   clima, fofocas, esportes — usando a busca na web do Claude.
+- **Respostas com atraso humano + status:** o personagem tem uma agenda diária
+  (dormindo, trabalhando, em reunião, vendo um filme, livre…) que define quando
+  ele responde rápido, devagar ou só ao acordar. O app mostra o status dele e
+  você também pode definir o **seu** status, que vira contexto pra ele comentar.
 
 > Funcionalidades da visão completa que ainda **não** estão aqui (ver Roadmap):
 > múltiplos personagens conversando entre si no mesmo grupo.
@@ -159,6 +163,41 @@ Claude** (server-side) para achar algo **real e recente** sobre seus interesses
 > Requer um modelo com suporte à busca (o padrão `claude-opus-4-7` suporta). A
 > busca roda no servidor da Anthropic; nada é configurado no app.
 
+## Respostas com atraso humano e status
+
+O personagem não responde mais na hora: ele tem uma **agenda diária**
+(`schedule`, gerada junto com o personagem) com blocos como "dormindo",
+"trabalhando", "em reunião", "vendo um filme" ou "livre", cada um com uma
+responsividade (`fast`/`slow`/`away`/`asleep`).
+
+- Ao enviar uma mensagem, o backend calcula um atraso realista (curto na maioria
+  das vezes, às vezes minutos) conforme a atividade atual + acaso, e **agenda** a
+  resposta. O app recebe quando fica pronta (mesmo polling/push das proativas).
+- **Dormindo:** o personagem só responde quando "acordar". O app mostra o status
+  (ex: "em reunião", "dormindo 💤", "online", "digitando...").
+- A rotina **se adapta**: nas horas em que você mais conversa, ele tende a
+  responder mais rápido.
+- **Seu status:** no topo do chat você escolhe seu status (No trabalho, Em
+  reunião, Vendo um filme, Ocupado, Ausente, Disponível). Isso é enviado como
+  contexto pro personagem — ele pode perguntar/comentar ("como tá o trabalho?",
+  "tá ocupado?") e não estranhar se você demorar.
+- O que o personagem está fazendo agora também entra no prompt: ele pode
+  comentar naturalmente ("tô no trabalho mas deu uma brecha", "acabei de ver um
+  filme…").
+
+Tudo é configurável em `backend/.env` (`REPLY_*`). A lógica de agenda/atraso
+está em `backend/src/availability.ts`.
+
+### Testar rápido
+
+Os atrasos podem chegar a minutos. Para ver as respostas chegando em segundos:
+
+```bash
+REPLY_SPEED_FACTOR=0.05 npm run dev
+```
+
+Para voltar ao comportamento antigo (resposta imediata): `REPLY_DELAY_ENABLED=false`.
+
 ## API do backend
 
 | Método | Rota                                | Descrição                                    |
@@ -166,9 +205,10 @@ Claude** (server-side) para achar algo **real e recente** sobre seus interesses
 | `GET`  | `/health`                           | Status do servidor.                          |
 | `POST` | `/api/characters/generate`          | Gera personagem + conversa + 1ª mensagem.    |
 | `GET`  | `/api/conversations/:id`            | Retorna conversa, personagens e histórico.   |
-| `GET`  | `/api/conversations/:id/messages?after=<ISO>` | Mensagens novas (polling).         |
-| `POST` | `/api/conversations/:id/messages`   | Envia mensagem e recebe a resposta.          |
+| `GET`  | `/api/conversations/:id/messages?after=<ISO>` | Mensagens novas + status (polling). |
+| `POST` | `/api/conversations/:id/messages`   | Envia mensagem (resposta vem com atraso, via polling). |
 | `POST` | `/api/conversations/:id/push-token` | Registra um token de push (Expo).            |
+| `POST` | `/api/conversations/:id/user-status` | Define o status do usuário (contexto pro personagem). |
 
 ## Roadmap (visão completa)
 

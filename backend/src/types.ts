@@ -14,6 +14,24 @@ export interface Personality {
   speakingStyle: string;
 }
 
+/**
+ * Quão disponível o personagem está numa atividade:
+ * - fast: livre, responde rapidinho
+ * - slow: ocupado, responde mais devagar
+ * - away: bem ocupado (reunião, academia), demora bastante
+ * - asleep: dormindo, só responde ao acordar
+ */
+export type Responsiveness = 'fast' | 'slow' | 'away' | 'asleep';
+
+/** Um bloco da agenda diária do personagem (horas locais 0-24). */
+export interface ScheduleBlock {
+  startHour: number;
+  endHour: number;
+  /** O que está fazendo, em linguagem natural (ex: "trabalhando", "em reunião"). */
+  activity: string;
+  responsiveness: Responsiveness;
+}
+
 export interface Character {
   id: string;
   name: string;
@@ -27,6 +45,8 @@ export interface Character {
   backstory: string;
   routine: string;
   timeline: TimelineEvent[];
+  /** Agenda diária típica — define o que faz e quão disponível está a cada hora. */
+  schedule: ScheduleBlock[];
   createdAt: string;
 }
 
@@ -50,6 +70,16 @@ export interface Conversation {
   characterIds: string[];
   /** Nome de quem conversa — usado nas mensagens proativas. */
   userName?: string;
+  /** Status definido pelo usuário (ex: "em reunião") — vira contexto pro personagem. */
+  userStatus?: string;
+  createdAt: string;
+}
+
+/** Resposta agendada (atraso humano) que ainda será gerada e entregue. */
+export interface PendingReply {
+  id: string;
+  conversationId: string;
+  dueAt: string;
   createdAt: string;
 }
 

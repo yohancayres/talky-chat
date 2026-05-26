@@ -1,15 +1,24 @@
 import { randomUUID } from 'crypto';
 import { Router } from 'express';
 import { generateCharacter, generateReply } from './ai';
+import { computeReplyDueAt } from './availability';
 import { config } from './config';
 import { INTRO_DIRECTIVE } from './prompts';
-import { initProactiveForConversation, touchProactive } from './scheduler';
+import {
+  getConversationStatus,
+  initProactiveForConversation,
+  touchProactive,
+} from './scheduler';
 import {
   addMessage,
+  addPendingReply,
   addPushToken,
+  bumpUserActivity,
   getCharacter,
   getConversation,
   getMessages,
+  getUserActivity,
+  hasPendingReply,
   saveCharacter,
   saveConversation,
 } from './store';
@@ -50,7 +59,11 @@ router.post('/characters/generate', async (req, res) => {
     saveConversation(conversation);
     initProactiveForConversation(conversation.id);
 
-    const introText = await generateReply(character, [], userName, INTRO_DIRECTIVE);
+    // A mensagem de boas-vindas é imediata (não cair num chat vazio).
+    const introText = await generateReply(character, [], {
+      userName,
+      directive: INTRO_DIRECTIVE,
+    });
     const introMessage = characterMessage(conversation.id, character, introText);
     addMessage(introMessage);
 
@@ -72,7 +85,20 @@ router.get('/conversations/:id', (req, res) => {
     .map(getCharacter)
     .filter((c): c is Character => Boolean(c));
   const messages = getMessages(conversation.id);
-  res.json({ conversation, characters, messages });
+  res.json({ conversation, characters, messages, status: getConversationStatus(conversation.id) });
+});
+
+// Define/limpa o status do usuário (ex: "em reunião"). Vira contexto pro personagem.
+router.post('/conversations/:id/user-status', (req, res) => {
+  const conversation = getConversation(req.params.id);
+  if (!conversation) {
+    res.status(404).json({ error: 'Conversa não encontrada.' });
+    return;
+  }
+  const { status } = req.body ?? {};
+  const value = typeof status === 'string' ? status.trim() : '';
+  saveConversation({ ...conversation, userStatus: value || undefined });
+  res.json({ ok: true, userStatus: value || null });
 });
 
 // Polling: retorna apenas as mensagens criadas depois de `after` (ISO).
@@ -88,7 +114,7 @@ router.get('/conversations/:id/messages', (req, res) => {
   if (after) {
     messages = messages.filter((m) => m.createdAt > after);
   }
-  res.json({ messages });
+  res.json({ messages, status: getConversationStatus(conversation.id) });
 });
 
 // Registra um token de push (Expo) para receber mensagens proativas.
@@ -122,6 +148,7 @@ router.post('/conversations/:id/messages', async (req, res) => {
       return;
     }
 
+    const now = new Date();
     const userMessage: Message = {
       id: randomUUID(),
       conversationId: conversation.id,
@@ -129,9 +156,11 @@ router.post('/conversations/:id/messages', async (req, res) => {
       senderId: 'user',
       senderName: userName?.trim() || 'Você',
       text: String(text).trim(),
-      createdAt: new Date().toISOString(),
+      createdAt: now.toISOString(),
     };
     addMessage(userMessage);
+    bumpUserActivity(conversation.id, now.getHours());
+    touchProactive(conversation.id);
 
     const character = getCharacter(conversation.characterIds[0]);
     if (!character) {
@@ -139,22 +168,38 @@ router.post('/conversations/:id/messages', async (req, res) => {
       return;
     }
 
+    // Atraso humano: agenda a resposta para mais tarde (gerada pelo scheduler) e
+    // responde já só com a mensagem do usuário. O app recebe a resposta via polling.
+    if (config.reply.enabled) {
+      if (!hasPendingReply(conversation.id)) {
+        const { dueAt } = computeReplyDueAt(character, now, getUserActivity(conversation.id));
+        addPendingReply({
+          id: randomUUID(),
+          conversationId: conversation.id,
+          dueAt: dueAt.toISOString(),
+          createdAt: now.toISOString(),
+        });
+      }
+      res.json({ userMessage, replies: [], status: getConversationStatus(conversation.id) });
+      return;
+    }
+
+    // Modo imediato (atraso desligado).
     const history = getMessages(conversation.id);
-    const replyText = await generateReply(
-      character,
-      history,
+    const replyText = await generateReply(character, history, {
       userName,
-      undefined,
-      config.webSearch.enabled && config.webSearch.inReplies,
-    );
+      userStatus: conversation.userStatus,
+      useWebSearch: config.webSearch.enabled && config.webSearch.inReplies,
+    });
     const replyMessage = characterMessage(conversation.id, character, replyText);
     addMessage(replyMessage);
-
-    // Reinicia o cronômetro de silêncio: nada de mensagem proativa logo após
-    // uma conversa ativa.
     touchProactive(conversation.id);
 
-    res.json({ userMessage, replies: [replyMessage] });
+    res.json({
+      userMessage,
+      replies: [replyMessage],
+      status: getConversationStatus(conversation.id),
+    });
   } catch (err) {
     console.error('[talky] erro ao responder mensagem:', err);
     res.status(500).json({ error: messageOf(err) });

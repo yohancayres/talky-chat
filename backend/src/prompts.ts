@@ -33,8 +33,23 @@ Responda SOMENTE com um objeto JSON válido. Sem markdown, sem cercas de código
   "routine": string,                // 1 parágrafo de rotina diária
   "timeline": [                     // 4-6 marcos da vida, em ordem cronológica
     { "age": string, "title": string, "description": string }
+  ],
+  "schedule": [                     // 5-8 blocos cobrindo um dia típico (24h)
+    {
+      "startHour": number,          // 0-23
+      "endHour": number,            // 1-24 (use 24 para meia-noite)
+      "activity": string,           // o que está fazendo, natural: "trabalhando", "em reunião", "na academia", "assistindo um filme", "dormindo", "livre em casa"
+      "responsiveness": string      // "fast" | "slow" | "away" | "asleep"
+    }
   ]
-}`;
+}
+
+A agenda (schedule) deve cobrir as 24h sem buracos e ser COERENTE com a profissão
+e a rotina (quem trabalha de dia fica ocupado nesse período; notívago dorme de
+dia; etc.). Use atividades variadas e específicas. Mapeie a disponibilidade:
+"fast" = livre, responde na hora; "slow" = ocupado, responde devagar; "away" =
+muito ocupado (reunião, academia, dirigindo), demora bastante; "asleep" =
+dormindo, só responde ao acordar.`;
 
 export function buildCharacterUserPrompt(hint?: string, userName?: string): string {
   const parts: string[] = ['Crie um novo personagem para o Talky.'];
@@ -57,10 +72,31 @@ function bullets(items: string[]): string {
   return items.map((i) => `- ${i}`).join('\n');
 }
 
+export interface Presence {
+  activity: string;
+  responsiveness: 'fast' | 'slow' | 'away' | 'asleep';
+}
+
+function presenceSection(presence?: Presence): string {
+  if (!presence || presence.responsiveness === 'asleep') return '';
+  const busy =
+    presence.responsiveness === 'away' || presence.responsiveness === 'slow'
+      ? ' Você está ocupado(a) agora, então responde de forma mais curta/corrida.'
+      : '';
+  return `\n# Agora\nNeste momento você está: ${presence.activity}.${busy} Se fizer sentido, comente naturalmente o que está fazendo ou algo que acabou de acontecer com você — mas não force, não é obrigatório.\n`;
+}
+
+function userStatusSection(name: string, userStatus?: string): string {
+  if (!userStatus || !userStatus.trim()) return '';
+  return `\n# Status de ${name} agora\n${name} marcou que está: ${userStatus.trim()}. Leve isso em conta — você pode perguntar ou comentar sobre isso de forma natural (ex: como está o trabalho, se está ocupado), e não estranhar se demorar a responder. Não force.\n`;
+}
+
 export function buildChatSystemPrompt(
   character: Character,
   userName: string | undefined,
   todayStr: string,
+  presence?: Presence,
+  userStatus?: string,
 ): string {
   const p = character.personality;
   const timeline = character.timeline
@@ -70,6 +106,7 @@ export function buildChatSystemPrompt(
   const name = userName && userName.trim() ? userName.trim() : 'a pessoa';
 
   return `Você É ${character.name}, ${character.age} anos, ${character.occupation}, de ${character.location}. Você não é uma IA nem um assistente — você é uma pessoa real conversando por um aplicativo de mensagens.
+${presenceSection(presence)}${userStatusSection(name, userStatus)}
 
 # Quem você é
 ${p.summary}

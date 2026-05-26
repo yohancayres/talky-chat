@@ -9,7 +9,8 @@ import {
   buildNewsDirective,
   buildProactiveDirective,
 } from './prompts';
-import { Character, Message } from './types';
+import { currentPresence, defaultSchedule } from './availability';
+import { Character, Message, Responsiveness, ScheduleBlock } from './types';
 
 type ApiMessage = { role: 'user' | 'assistant'; content: string };
 
@@ -87,6 +88,8 @@ export async function generateCharacter(
       }))
     : [];
 
+  const schedule = normalizeSchedule(data.schedule);
+
   return {
     id: randomUUID(),
     name: String(data.name ?? 'Alex'),
@@ -108,8 +111,30 @@ export async function generateCharacter(
     backstory: String(data.backstory ?? ''),
     routine: String(data.routine ?? ''),
     timeline,
+    schedule,
     createdAt: new Date().toISOString(),
   };
+}
+
+const VALID_RESPONSIVENESS: Responsiveness[] = ['fast', 'slow', 'away', 'asleep'];
+
+function normalizeSchedule(value: unknown): ScheduleBlock[] {
+  if (!Array.isArray(value)) return defaultSchedule();
+  const blocks: ScheduleBlock[] = [];
+  for (const raw of value as Record<string, unknown>[]) {
+    const startHour = Math.round(Number(raw.startHour));
+    const endHour = Math.round(Number(raw.endHour));
+    const responsiveness = String(raw.responsiveness) as Responsiveness;
+    if (!Number.isFinite(startHour) || !Number.isFinite(endHour)) continue;
+    if (startHour < 0 || startHour > 23 || endHour < 1 || endHour > 24) continue;
+    blocks.push({
+      startHour,
+      endHour,
+      activity: String(raw.activity ?? 'livre'),
+      responsiveness: VALID_RESPONSIVENESS.includes(responsiveness) ? responsiveness : 'fast',
+    });
+  }
+  return blocks.length > 0 ? blocks : defaultSchedule();
 }
 
 function buildApiMessages(history: Message[]): ApiMessage[] {
@@ -125,18 +150,31 @@ const WEB_SEARCH_TOOL = { type: 'web_search_20260209', name: 'web_search' } as c
  * Executa um turno do personagem no chat. `directive` é uma instrução pontual
  * (não armazenada). Com `useWebSearch`, o personagem pode buscar na web.
  */
+interface ChatContext {
+  userName?: string;
+  /** Status definido pelo usuário (ex: "em reunião"). */
+  userStatus?: string;
+  directive?: string;
+  useWebSearch?: boolean;
+}
+
 async function runChat(
   character: Character,
   history: Message[],
-  userName?: string,
-  directive?: string,
-  useWebSearch = false,
+  ctx: ChatContext = {},
 ): Promise<string> {
-  const system = buildChatSystemPrompt(character, userName, todayStr());
+  const presence = currentPresence(character, new Date());
+  const system = buildChatSystemPrompt(
+    character,
+    ctx.userName,
+    todayStr(),
+    presence,
+    ctx.userStatus,
+  );
   const messages = buildApiMessages(history);
 
-  if (directive) {
-    messages.push({ role: 'user', content: directive });
+  if (ctx.directive) {
+    messages.push({ role: 'user', content: ctx.directive });
   }
 
   // A API exige que a conversa comece com uma mensagem do usuário. Como o
@@ -145,6 +183,7 @@ async function runChat(
     messages.unshift({ role: 'user', content: 'O usuário acabou de abrir o aplicativo de chat.' });
   }
 
+  const useWebSearch = ctx.useWebSearch ?? false;
   const resp = await anthropic.messages.create({
     model: config.model,
     max_tokens: useWebSearch ? 1500 : 1024,
@@ -165,11 +204,9 @@ async function runChat(
 export function generateReply(
   character: Character,
   history: Message[],
-  userName?: string,
-  directive?: string,
-  useWebSearch = false,
+  ctx: ChatContext = {},
 ): Promise<string> {
-  return runChat(character, history, userName, directive, useWebSearch);
+  return runChat(character, history, ctx);
 }
 
 /**
@@ -179,11 +216,14 @@ export function generateReply(
 export function generateProactiveMessage(
   character: Character,
   history: Message[],
-  userName: string | undefined,
   now: Date,
-  lastMessageAt?: string,
+  ctx: { userName?: string; userStatus?: string; lastMessageAt?: string } = {},
 ): Promise<string> {
-  return runChat(character, history, userName, buildProactiveDirective(now, lastMessageAt));
+  return runChat(character, history, {
+    userName: ctx.userName,
+    userStatus: ctx.userStatus,
+    directive: buildProactiveDirective(now, ctx.lastMessageAt),
+  });
 }
 
 /**
@@ -194,10 +234,15 @@ export function generateProactiveMessage(
 export async function generateNewsMessage(
   character: Character,
   history: Message[],
-  userName: string | undefined,
   now: Date,
+  ctx: { userName?: string; userStatus?: string } = {},
 ): Promise<string> {
-  const text = await runChat(character, history, userName, buildNewsDirective(character, now), true);
+  const base = { userName: ctx.userName, userStatus: ctx.userStatus };
+  const text = await runChat(character, history, {
+    ...base,
+    directive: buildNewsDirective(character, now),
+    useWebSearch: true,
+  });
   if (text.trim()) return text;
-  return runChat(character, history, userName, buildProactiveDirective(now));
+  return runChat(character, history, { ...base, directive: buildProactiveDirective(now) });
 }

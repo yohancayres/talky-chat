@@ -43,5 +43,13 @@ export interface Conversation {
   id: string;
   title: string;
   characterIds: string[];
+  userName?: string;
+  userStatus?: string;
   createdAt: string;
+}
+
+export interface ChatStatus {
+  state: 'online' | 'busy' | 'sleeping';
+  activity: string;
+  typing: boolean;
 }

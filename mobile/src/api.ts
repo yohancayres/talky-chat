@@ -1,4 +1,4 @@
-import { Character, Conversation, Message } from './types';
+import { Character, ChatStatus, Conversation, Message } from './types';
 
 // Em emulador iOS / web, localhost funciona. Em um celular físico, troque por
 // http://SEU_IP_LOCAL:3000 definindo EXPO_PUBLIC_API_URL antes de rodar o app.
@@ -32,15 +32,18 @@ export interface ConversationResponse {
   conversation: Conversation;
   characters: Character[];
   messages: Message[];
+  status: ChatStatus;
 }
 
 export interface SendMessageResponse {
   userMessage: Message;
   replies: Message[];
+  status: ChatStatus;
 }
 
 export interface MessagesResponse {
   messages: Message[];
+  status: ChatStatus;
 }
 
 export const api = {
@@ -84,6 +87,14 @@ export const api = {
     return request<{ ok: boolean }>(`/api/conversations/${conversationId}/push-token`, {
       method: 'POST',
       body: JSON.stringify({ token }),
+    });
+  },
+
+  // Define o status do usuário (string vazia = disponível/limpar).
+  setUserStatus(conversationId: string, status: string): Promise<{ ok: boolean }> {
+    return request<{ ok: boolean }>(`/api/conversations/${conversationId}/user-status`, {
+      method: 'POST',
+      body: JSON.stringify({ status }),
     });
   },
 };

@@ -5,6 +5,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -15,28 +16,50 @@ import { CharacterProfileModal } from '../components/CharacterProfileModal';
 import { MessageBubble } from '../components/MessageBubble';
 import { TypingIndicator } from '../components/TypingIndicator';
 import { colors, radius } from '../theme';
-import { Character, Message } from '../types';
+import { Character, ChatStatus, Message } from '../types';
+
+const USER_STATUS_OPTIONS = [
+  'Disponível',
+  'No trabalho',
+  'Em reunião',
+  'Vendo um filme',
+  'Ocupado',
+  'Ausente',
+];
+
+function characterStatusLabel(status: ChatStatus | null, character: Character): string {
+  if (!status) return character.occupation || 'toque para ver o perfil';
+  if (status.typing) return 'digitando...';
+  if (status.state === 'sleeping') return `${status.activity || 'dormindo'} 💤`;
+  if (status.state === 'online') return 'online';
+  return status.activity || 'ocupado'; // busy → mostra a atividade (ex: "em reunião")
+}
 
 export function ChatScreen({
   conversationId,
   character,
   initialMessages,
   userName,
+  initialStatus,
+  initialUserStatus,
   onReset,
 }: {
   conversationId: string;
   character: Character;
   initialMessages: Message[];
   userName: string;
+  initialStatus?: ChatStatus | null;
+  initialUserStatus?: string;
   onReset: () => void;
 }) {
   const [messages, setMessages] = useState<Message[]>(initialMessages);
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
+  const [status, setStatus] = useState<ChatStatus | null>(initialStatus ?? null);
+  const [userStatus, setUserStatus] = useState<string>(initialUserStatus ?? '');
   const listRef = useRef<FlatList<Message>>(null);
 
-  // Marca a última mensagem do servidor já recebida (para o polling).
   const lastSyncRef = useRef<string>(
     initialMessages.length ? initialMessages[initialMessages.length - 1].createdAt : '',
   );
@@ -45,7 +68,6 @@ export function ChatScreen({
     requestAnimationFrame(() => listRef.current?.scrollToEnd({ animated: true }));
   }, []);
 
-  // Insere mensagens novas do servidor (sem duplicar) e avança o marcador.
   const mergeIncoming = useCallback((incoming: Message[]) => {
     if (incoming.length === 0) return;
     setMessages((prev) => {
@@ -62,14 +84,16 @@ export function ChatScreen({
     }
   }, []);
 
-  // Polling: recebe mensagens proativas (e respostas) enquanto o app está aberto.
+  // Polling: recebe respostas (com atraso), mensagens proativas e o status atual.
   useEffect(() => {
     let active = true;
 
     async function poll() {
       try {
         const res = await api.getNewMessages(conversationId, lastSyncRef.current);
-        if (active && res.messages.length > 0) {
+        if (!active) return;
+        setStatus(res.status);
+        if (res.messages.length > 0) {
           mergeIncoming(res.messages);
           scrollToEnd();
         }
@@ -79,7 +103,7 @@ export function ChatScreen({
     }
 
     poll();
-    const interval = setInterval(poll, 8000);
+    const interval = setInterval(poll, 5000);
     const subscription = AppState.addEventListener('change', (state) => {
       if (state === 'active') poll();
     });
@@ -113,6 +137,7 @@ export function ChatScreen({
       const res = await api.sendMessage(conversationId, text, userName);
       setMessages((prev) => prev.filter((m) => m.id !== optimistic.id));
       mergeIncoming([res.userMessage, ...res.replies]);
+      setStatus(res.status);
     } catch (e) {
       const errorText = e instanceof Error ? e.message : 'Falha ao enviar.';
       const systemMsg: Message = {
@@ -121,7 +146,7 @@ export function ChatScreen({
         role: 'character',
         senderId: character.id,
         senderName: character.name,
-        text: `(não consegui responder agora: ${errorText})`,
+        text: `(não consegui enviar agora: ${errorText})`,
         createdAt: new Date().toISOString(),
       };
       setMessages((prev) => [...prev, systemMsg]);
@@ -130,6 +155,18 @@ export function ChatScreen({
       scrollToEnd();
     }
   }
+
+  async function selectUserStatus(label: string) {
+    const value = label === 'Disponível' ? '' : label;
+    setUserStatus(value);
+    try {
+      await api.setUserStatus(conversationId, value);
+    } catch {
+      // mantém o valor local mesmo se a rede falhar
+    }
+  }
+
+  const isTyping = status?.typing ?? false;
 
   return (
     <KeyboardAvoidingView
@@ -142,11 +179,35 @@ export function ChatScreen({
         </View>
         <View style={styles.headerInfo}>
           <Text style={styles.headerName}>{character.name}</Text>
-          <Text style={styles.headerSubtitle} numberOfLines={1}>
-            {sending ? 'digitando...' : character.occupation || 'toque para ver o perfil'}
+          <Text
+            style={[styles.headerSubtitle, isTyping && styles.headerTyping]}
+            numberOfLines={1}
+          >
+            {characterStatusLabel(status, character)}
           </Text>
         </View>
       </Pressable>
+
+      <View style={styles.userStatusBar}>
+        <Text style={styles.userStatusLabel}>Seu status:</Text>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+          {USER_STATUS_OPTIONS.map((label) => {
+            const value = label === 'Disponível' ? '' : label;
+            const selected = userStatus === value;
+            return (
+              <Pressable
+                key={label}
+                style={[styles.statusChip, selected && styles.statusChipActive]}
+                onPress={() => selectUserStatus(label)}
+              >
+                <Text style={[styles.statusChipText, selected && styles.statusChipTextActive]}>
+                  {label}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </ScrollView>
+      </View>
 
       <FlatList
         ref={listRef}
@@ -156,7 +217,7 @@ export function ChatScreen({
         contentContainerStyle={styles.listContent}
         onContentSizeChange={scrollToEnd}
         ListFooterComponent={
-          sending ? (
+          isTyping ? (
             <TypingIndicator emoji={character.avatar.emoji} color={character.avatar.color} />
           ) : null
         }
@@ -217,6 +278,29 @@ const styles = StyleSheet.create({
   headerInfo: { flex: 1 },
   headerName: { fontSize: 17, fontWeight: '700', color: colors.text },
   headerSubtitle: { fontSize: 13, color: colors.muted, marginTop: 1 },
+  headerTyping: { color: colors.accent, fontStyle: 'italic' },
+  userStatusBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 8,
+    paddingLeft: 12,
+    backgroundColor: colors.surface,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
+  userStatusLabel: { fontSize: 12, color: colors.muted, marginRight: 8 },
+  statusChip: {
+    paddingVertical: 5,
+    paddingHorizontal: 12,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.bg,
+    marginRight: 8,
+  },
+  statusChipActive: { backgroundColor: colors.accent, borderColor: colors.accent },
+  statusChipText: { fontSize: 13, color: colors.text },
+  statusChipTextActive: { color: '#FFFFFF', fontWeight: '600' },
   listContent: { paddingVertical: 12 },
   inputBar: {
     flexDirection: 'row',

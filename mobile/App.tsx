@@ -7,7 +7,7 @@ import { registerForPushToken } from './src/push';
 import { ChatScreen } from './src/screens/ChatScreen';
 import { OnboardingScreen } from './src/screens/OnboardingScreen';
 import { colors } from './src/theme';
-import { Character, Message } from './src/types';
+import { Character, ChatStatus, Message } from './src/types';
 
 // Registra o token de push no backend (best-effort, não bloqueia a UI).
 async function syncPushToken(conversationId: string) {
@@ -26,7 +26,15 @@ type Screen =
   | { kind: 'booting' }
   | { kind: 'onboarding' }
   | { kind: 'error'; message: string }
-  | { kind: 'chat'; conversationId: string; character: Character; messages: Message[]; userName: string };
+  | {
+      kind: 'chat';
+      conversationId: string;
+      character: Character;
+      messages: Message[];
+      userName: string;
+      status?: ChatStatus | null;
+      userStatus?: string;
+    };
 
 export default function App() {
   const [screen, setScreen] = useState<Screen>({ kind: 'booting' });
@@ -53,6 +61,8 @@ export default function App() {
         character,
         messages: data.messages,
         userName,
+        status: data.status,
+        userStatus: data.conversation.userStatus,
       });
       void syncPushToken(conversationId);
     } catch (e) {
@@ -106,6 +116,8 @@ export default function App() {
           character={screen.character}
           initialMessages={screen.messages}
           userName={screen.userName}
+          initialStatus={screen.status}
+          initialUserStatus={screen.userStatus}
           onReset={handleReset}
         />
       )}
