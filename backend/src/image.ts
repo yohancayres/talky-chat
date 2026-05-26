@@ -89,6 +89,11 @@ export async function generateAvatar(
 ): Promise<string | null> {
   if (!config.image.enabled || !config.openaiApiKey) return null;
 
+  console.log(
+    `[talky] gerando foto de perfil de ${character.name} (${config.image.model}, ${config.image.size})...`,
+  );
+  const startedAt = Date.now();
+
   try {
     const res = await fetch(config.image.endpoint, {
       method: 'POST',
@@ -101,6 +106,7 @@ export async function generateAvatar(
         prompt: buildImagePrompt(character, opts.variation ?? false),
         size: config.image.size,
       }),
+      signal: AbortSignal.timeout(config.image.timeoutSeconds * 1000),
     });
 
     if (!res.ok) {
@@ -117,9 +123,14 @@ export async function generateAvatar(
     fs.mkdirSync(AVATARS_DIR, { recursive: true });
     const fileName = `${character.id}-${Date.now()}.png`;
     fs.writeFileSync(path.join(AVATARS_DIR, fileName), buffer);
+    console.log(`[talky] foto gerada em ${((Date.now() - startedAt) / 1000).toFixed(1)}s.`);
     return `/avatars/${fileName}`;
   } catch (err) {
-    console.warn('[talky] erro ao gerar foto de perfil:', err);
+    const timedOut = err instanceof Error && err.name === 'TimeoutError';
+    console.warn(
+      `[talky] erro ao gerar foto de perfil${timedOut ? ' (timeout)' : ''}:`,
+      err,
+    );
     return null;
   }
 }

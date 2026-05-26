@@ -4,22 +4,34 @@ import { Character, ChatStatus, Conversation, Message } from './types';
 // http://SEU_IP_LOCAL:3000 definindo EXPO_PUBLIC_API_URL antes de rodar o app.
 const BASE_URL = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:3000';
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${BASE_URL}${path}`, {
-    ...init,
-    headers: { 'Content-Type': 'application/json', ...(init?.headers ?? {}) },
-  });
-  if (!res.ok) {
-    let detail = `Erro ${res.status}`;
-    try {
-      const body = (await res.json()) as { error?: string };
-      if (body?.error) detail = body.error;
-    } catch {
-      // resposta sem corpo JSON
+async function request<T>(path: string, init?: RequestInit, timeoutMs = 30_000): Promise<T> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(`${BASE_URL}${path}`, {
+      ...init,
+      signal: controller.signal,
+      headers: { 'Content-Type': 'application/json', ...(init?.headers ?? {}) },
+    });
+    if (!res.ok) {
+      let detail = `Erro ${res.status}`;
+      try {
+        const body = (await res.json()) as { error?: string };
+        if (body?.error) detail = body.error;
+      } catch {
+        // resposta sem corpo JSON
+      }
+      throw new Error(detail);
     }
-    throw new Error(detail);
+    return (await res.json()) as T;
+  } catch (err) {
+    if (err instanceof Error && err.name === 'AbortError') {
+      throw new Error('Tempo esgotado. Verifique se o backend está rodando.');
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
   }
-  return (await res.json()) as T;
 }
 
 export interface GenerateResponse {
@@ -92,11 +104,13 @@ export const api = {
     });
   },
 
-  // Gera ou troca a foto de perfil do personagem.
+  // Gera ou troca a foto de perfil do personagem (pode levar dezenas de segundos).
   regenerateAvatar(characterId: string): Promise<{ character: Character }> {
-    return request<{ character: Character }>(`/api/characters/${characterId}/avatar`, {
-      method: 'POST',
-    });
+    return request<{ character: Character }>(
+      `/api/characters/${characterId}/avatar`,
+      { method: 'POST' },
+      120_000,
+    );
   },
 
   // Define o status do usuário (string vazia = disponível/limpar).
