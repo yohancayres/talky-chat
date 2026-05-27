@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
-  ActivityIndicator,
+  Animated,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -11,6 +11,7 @@ import {
   View,
 } from 'react-native';
 import { api, GenerateResponse } from '../api';
+import { haptics } from '../haptics';
 import { colors, radius } from '../theme';
 
 const LOADING_LINES = [
@@ -19,6 +20,41 @@ const LOADING_LINES = [
   'Definindo a personalidade...',
   'Preparando a primeira mensagem...',
 ];
+
+// Tela de carregamento com barra de progresso animada e texto em crossfade.
+function CreatingView({ lineIndex }: { lineIndex: number }) {
+  const fade = useRef(new Animated.Value(0)).current;
+  const progress = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    fade.setValue(0);
+    Animated.timing(fade, { toValue: 1, duration: 400, useNativeDriver: true }).start();
+  }, [lineIndex, fade]);
+
+  useEffect(() => {
+    // Avança a barra por etapas, mas nunca chega a 100% (só ao concluir de fato).
+    const target = Math.min(0.9, (lineIndex + 1) / (LOADING_LINES.length + 1));
+    Animated.timing(progress, {
+      toValue: target,
+      duration: 2000,
+      useNativeDriver: false,
+    }).start();
+  }, [lineIndex, progress]);
+
+  const width = progress.interpolate({ inputRange: [0, 1], outputRange: ['0%', '100%'] });
+
+  return (
+    <View style={styles.loadingContainer}>
+      <Text style={styles.logoEmoji}>💬</Text>
+      <View style={styles.progressTrack}>
+        <Animated.View style={[styles.progressFill, { width }]} />
+      </View>
+      <Animated.Text style={[styles.loadingText, { opacity: fade }]}>
+        {LOADING_LINES[lineIndex]}
+      </Animated.Text>
+    </View>
+  );
+}
 
 export function OnboardingScreen({
   userId,
@@ -40,6 +76,7 @@ export function OnboardingScreen({
   const [lineIndex, setLineIndex] = useState(0);
 
   async function handleCreate() {
+    haptics.medium();
     setError(null);
     setLoading(true);
 
@@ -49,8 +86,10 @@ export function OnboardingScreen({
 
     try {
       const result = await api.generateCharacter(hint.trim(), name.trim(), userId);
+      haptics.success();
       onCreated(result, name.trim());
     } catch (e) {
+      haptics.error();
       setError(e instanceof Error ? e.message : 'Não foi possível criar o personagem.');
     } finally {
       clearInterval(timer);
@@ -59,13 +98,7 @@ export function OnboardingScreen({
   }
 
   if (loading) {
-    return (
-      <View style={styles.loadingContainer}>
-        <Text style={styles.logoEmoji}>💬</Text>
-        <ActivityIndicator size="large" color={colors.accent} style={{ marginVertical: 24 }} />
-        <Text style={styles.loadingText}>{LOADING_LINES[lineIndex]}</Text>
-      </View>
-    );
+    return <CreatingView lineIndex={lineIndex} />;
   }
 
   return (
@@ -143,6 +176,15 @@ const styles = StyleSheet.create({
     padding: 32,
   },
   logoEmoji: { fontSize: 52, textAlign: 'center' },
+  progressTrack: {
+    width: 200,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: colors.border,
+    overflow: 'hidden',
+    marginVertical: 28,
+  },
+  progressFill: { height: 6, borderRadius: 3, backgroundColor: colors.accent },
   title: {
     fontSize: 40,
     fontWeight: '800',

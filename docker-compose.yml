@@ -1,0 +1,45 @@
+# Produção: backend Talky + MongoDB.
+# Variáveis (interpolação) vêm de um arquivo .env NESTA pasta:
+#   MONGO_USER=talky
+#   MONGO_PASSWORD=<senha forte>
+#   MONGO_DB=talky
+#   BACKEND_IMAGE=ghcr.io/SEU_USUARIO/talky-backend:latest   # (deploy via CI)
+# As chaves de IA e demais configs do app ficam em ./backend/.env.
+#
+# HTTPS: coloque um proxy reverso na frente (Caddy/Traefik) OU use um painel
+# (Coolify/Dokploy) que já cuida de TLS. Veja o README.
+
+services:
+  mongo:
+    image: mongo:7
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_USER:-talky}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASSWORD:?defina MONGO_PASSWORD no .env}
+    volumes:
+      - mongo-data:/data/db
+    # Não exponha a porta do Mongo publicamente; fica só na rede interna do compose.
+
+  backend:
+    # Em CI/produção, BACKEND_IMAGE aponta para o GHCR (imagem pré-construída).
+    # Local: `docker compose up --build` constrói a partir de ./backend.
+    image: ${BACKEND_IMAGE:-talky-backend:local}
+    build: ./backend
+    restart: unless-stopped
+    env_file:
+      - ./backend/.env # ANTHROPIC_API_KEY, OPENAI_API_KEY, TALKY_MODEL, etc.
+    environment:
+      # Sobrescreve a persistência para o MongoDB deste compose.
+      MONGODB_URI: mongodb://${MONGO_USER:-talky}:${MONGO_PASSWORD}@mongo:27017/${MONGO_DB:-talky}?authSource=admin
+      MONGODB_DB: ${MONGO_DB:-talky}
+      PORT: "3000"
+    ports:
+      - "${BACKEND_PORT:-3000}:3000"
+    volumes:
+      - talky-data:/app/data # avatares e fotos do chat (persistem entre deploys)
+    depends_on:
+      - mongo
+
+volumes:
+  mongo-data:
+  talky-data:

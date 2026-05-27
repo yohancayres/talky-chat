@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   AppState,
   FlatList,
   Pressable,
@@ -11,19 +12,14 @@ import {
 } from 'react-native';
 import { api } from '../api';
 import { Avatar } from '../components/Avatar';
-import { colors } from '../theme';
+import { haptics } from '../haptics';
+import { colors, radius, shadow } from '../theme';
+import { formatListTime } from '../time';
 import { ConversationSummary } from '../types';
 
-function timeLabel(iso?: string): string {
-  if (!iso) return '';
-  const date = new Date(iso);
-  const now = new Date();
-  const sameDay = date.toDateString() === now.toDateString();
-  if (sameDay) {
-    return date.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
-  }
-  return date.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
-}
+// Cache em memória: ao reabrir a lista, mostra os últimos dados na hora (sem
+// spinner) e atualiza em silêncio. Evita o "refresh" ao voltar de uma conversa.
+let cachedConversations: ConversationSummary[] = [];
 
 export function ConversationListScreen({
   userId,
@@ -34,19 +30,27 @@ export function ConversationListScreen({
   onOpen: (conversationId: string) => void;
   onNewContact: () => void;
 }) {
-  const [items, setItems] = useState<ConversationSummary[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [items, setItems] = useState<ConversationSummary[]>(cachedConversations);
+  const [loading, setLoading] = useState(cachedConversations.length === 0);
+  const [refreshing, setRefreshing] = useState(false);
 
   const load = useCallback(async () => {
     try {
       const res = await api.getConversations(userId);
       setItems(res.conversations);
+      cachedConversations = res.conversations;
     } catch {
       // mantém a lista atual em caso de falha de rede
     } finally {
       setLoading(false);
     }
   }, [userId]);
+
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await load();
+    setRefreshing(false);
+  }, [load]);
 
   useEffect(() => {
     load();
@@ -60,15 +64,60 @@ export function ConversationListScreen({
     };
   }, [load]);
 
+  const handleOpen = useCallback(
+    (id: string) => {
+      haptics.selection();
+      onOpen(id);
+    },
+    [onOpen],
+  );
+
+  const handleNewContact = useCallback(() => {
+    haptics.medium();
+    onNewContact();
+  }, [onNewContact]);
+
+  const handleDelete = useCallback(
+    (item: ConversationSummary) => {
+      const name = item.character?.name ?? item.conversation.title;
+      haptics.selection();
+      Alert.alert(
+        'Excluir conversa',
+        `Apagar sua conversa com ${name}? O histórico será removido. ${name} continua no Talky e você pode reencontrá-lo(a) depois.`,
+        [
+          { text: 'Cancelar', style: 'cancel' },
+          {
+            text: 'Excluir',
+            style: 'destructive',
+            onPress: async () => {
+              haptics.medium();
+              // Remove já da lista (otimista); recarrega do servidor se falhar.
+              setItems((prev) => prev.filter((i) => i.conversation.id !== item.conversation.id));
+              try {
+                await api.deleteConversation(item.conversation.id);
+              } catch {
+                load();
+              }
+            },
+          },
+        ],
+      );
+    },
+    [load],
+  );
+
   function renderItem({ item }: { item: ConversationSummary }) {
     const name = item.character?.name ?? item.conversation.title;
+    const hasUnread = item.unread > 0;
     const preview = item.lastMessage
       ? `${item.lastMessage.role === 'user' ? 'Você: ' : ''}${item.lastMessage.text}`
       : 'Toque para conversar';
     return (
       <Pressable
         style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
-        onPress={() => onOpen(item.conversation.id)}
+        onPress={() => handleOpen(item.conversation.id)}
+        onLongPress={() => handleDelete(item)}
+        delayLongPress={350}
       >
         {item.character ? (
           <Avatar character={item.character} size={54} />
@@ -77,19 +126,21 @@ export function ConversationListScreen({
         )}
         <View style={styles.rowBody}>
           <View style={styles.rowTop}>
-            <Text style={styles.name} numberOfLines={1}>
+            <Text style={[styles.name, hasUnread && styles.nameUnread]} numberOfLines={1}>
               {name}
             </Text>
-            <Text style={styles.time}>{timeLabel(item.lastMessage?.createdAt)}</Text>
+            <Text style={[styles.time, hasUnread && styles.timeUnread]}>
+              {formatListTime(item.lastMessage?.createdAt)}
+            </Text>
           </View>
           <View style={styles.rowBottom}>
             <Text
-              style={[styles.preview, item.unread > 0 && styles.previewUnread]}
+              style={[styles.preview, hasUnread && styles.previewUnread]}
               numberOfLines={1}
             >
               {preview}
             </Text>
-            {item.unread > 0 && (
+            {hasUnread && (
               <View style={styles.badge}>
                 <Text style={styles.badgeText}>{item.unread > 99 ? '99+' : item.unread}</Text>
               </View>
@@ -104,7 +155,11 @@ export function ConversationListScreen({
     <View style={styles.container}>
       <View style={styles.header}>
         <Text style={styles.title}>Conversas</Text>
-        <Pressable style={styles.newButton} onPress={onNewContact} hitSlop={10}>
+        <Pressable
+          style={({ pressed }) => [styles.newButton, pressed && styles.newButtonPressed]}
+          onPress={handleNewContact}
+          hitSlop={10}
+        >
           <Text style={styles.newButtonText}>+</Text>
         </Pressable>
       </View>
@@ -119,9 +174,29 @@ export function ConversationListScreen({
           keyExtractor={(i) => i.conversation.id}
           renderItem={renderItem}
           ItemSeparatorComponent={() => <View style={styles.separator} />}
-          refreshControl={<RefreshControl refreshing={false} onRefresh={load} />}
+          contentContainerStyle={items.length === 0 ? styles.emptyContent : undefined}
+          ListFooterComponent={
+            items.length > 0 ? (
+              <Text style={styles.hint}>Segure uma conversa para excluir</Text>
+            ) : null
+          }
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={onRefresh}
+              tintColor={colors.accent}
+              colors={[colors.accent]}
+            />
+          }
           ListEmptyComponent={
-            <Text style={styles.empty}>Nenhuma conversa ainda. Toque em + para conhecer alguém.</Text>
+            <View style={styles.empty}>
+              <Text style={styles.emptyEmoji}>💬</Text>
+              <Text style={styles.emptyTitle}>Nenhuma conversa ainda</Text>
+              <Text style={styles.emptyText}>Toque em + para conhecer alguém no Talky.</Text>
+              <Pressable style={styles.emptyButton} onPress={handleNewContact}>
+                <Text style={styles.emptyButtonText}>Conhecer alguém</Text>
+              </Pressable>
+            </View>
           }
         />
       )}
@@ -141,6 +216,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface,
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
+    ...shadow.sm,
   },
   title: { fontSize: 26, fontWeight: '800', color: colors.text },
   newButton: {
@@ -150,7 +226,9 @@ const styles = StyleSheet.create({
     backgroundColor: colors.accent,
     alignItems: 'center',
     justifyContent: 'center',
+    ...shadow.sm,
   },
+  newButtonPressed: { backgroundColor: colors.accentDark },
   newButtonText: { color: '#FFFFFF', fontSize: 24, lineHeight: 26, marginTop: -2 },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   row: {
@@ -170,7 +248,9 @@ const styles = StyleSheet.create({
   rowTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   rowBottom: { flexDirection: 'row', alignItems: 'center', marginTop: 3 },
   name: { fontSize: 17, fontWeight: '700', color: colors.text, flex: 1, marginRight: 8 },
+  nameUnread: { fontWeight: '800' },
   time: { fontSize: 12, color: colors.muted },
+  timeUnread: { color: colors.accent, fontWeight: '700' },
   preview: { fontSize: 14, color: colors.muted, flex: 1, marginRight: 8 },
   previewUnread: { color: colors.text, fontWeight: '600' },
   badge: {
@@ -184,5 +264,19 @@ const styles = StyleSheet.create({
   },
   badgeText: { color: '#FFFFFF', fontSize: 12, fontWeight: '700' },
   separator: { height: 1, backgroundColor: colors.border, marginLeft: 84 },
-  empty: { textAlign: 'center', color: colors.muted, marginTop: 48, paddingHorizontal: 32, fontSize: 15 },
+  hint: { textAlign: 'center', color: colors.muted, fontSize: 12, paddingVertical: 20 },
+  emptyContent: { flexGrow: 1 },
+  empty: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 40 },
+  emptyEmoji: { fontSize: 52 },
+  emptyTitle: { fontSize: 19, fontWeight: '700', color: colors.text, marginTop: 16 },
+  emptyText: { textAlign: 'center', color: colors.muted, marginTop: 6, fontSize: 15, lineHeight: 21 },
+  emptyButton: {
+    marginTop: 22,
+    backgroundColor: colors.accent,
+    borderRadius: radius.md,
+    paddingVertical: 12,
+    paddingHorizontal: 28,
+    ...shadow.sm,
+  },
+  emptyButtonText: { color: '#FFFFFF', fontSize: 16, fontWeight: '700' },
 });

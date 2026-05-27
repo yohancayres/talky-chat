@@ -1,3 +1,6 @@
+import { config } from './config';
+import { DEFAULT_INTIMACY, describeIntimacyForPrompt } from './intimacy';
+import { describeMoodForPrompt } from './mood';
 import { Character } from './types';
 
 // ---------------------------------------------------------------------------
@@ -117,7 +120,11 @@ irônicos, outros doces e carinhosos, outros brutos, implicantes, sonhadores,
 céticos, nerds, passivo-agressivos. Evite deixar tudo mediano — dê extremos que
 tornem o personagem marcante e único.`;
 
-export function buildCharacterUserPrompt(hint?: string, userName?: string): string {
+export function buildCharacterUserPrompt(
+  hint?: string,
+  userName?: string,
+  avoidNames?: string[],
+): string {
   const parts: string[] = ['Crie um novo personagem para o Talky.'];
   if (userName && userName.trim()) {
     parts.push(`A pessoa que vai conversar com ele se chama ${userName.trim()}.`);
@@ -126,6 +133,13 @@ export function buildCharacterUserPrompt(hint?: string, userName?: string): stri
     parts.push(`Pedido/vibe da pessoa para o personagem: "${hint.trim()}". Use isso como inspiração, mas garanta originalidade.`);
   } else {
     parts.push('Surpreenda com alguém interessante e inesperado.');
+  }
+  if (avoidNames && avoidNames.length > 0) {
+    // Limita a lista para não inflar o prompt e dá a instrução de variar o nome.
+    const sample = avoidNames.slice(-40).join(', ');
+    parts.push(
+      `Estes nomes JÁ existem no Talky — escolha um nome (primeiro nome E sobrenome) CLARAMENTE diferente de todos eles, e evite repetir primeiros nomes já comuns na lista: ${sample}.`,
+    );
   }
   return parts.join(' ');
 }
@@ -163,6 +177,7 @@ export function buildChatSystemPrompt(
   todayStr: string,
   presence?: Presence,
   userStatus?: string,
+  intimacy?: number,
 ): string {
   const p = character.personality;
   const timeline = character.timeline
@@ -176,8 +191,15 @@ export function buildChatSystemPrompt(
     ? `\n# Seu temperamento\nDeixe estes traços transparecerem no seu tom e nas suas reações, de forma natural — sem virar caricatura:\n${temperament}\n`
     : '';
 
+  const moodSection =
+    config.mood.enabled && character.mood ? describeMoodForPrompt(character.mood) : '';
+
+  const intimacySection = config.intimacy.enabled
+    ? describeIntimacyForPrompt(intimacy ?? DEFAULT_INTIMACY, name)
+    : '';
+
   return `Você É ${character.name}, ${character.age} anos, ${character.occupation}, de ${character.location}. Você não é uma IA nem um assistente — você é uma pessoa real conversando por um aplicativo de mensagens.
-${presenceSection(presence)}${userStatusSection(name, userStatus)}${temperamentSection}
+${presenceSection(presence)}${userStatusSection(name, userStatus)}${temperamentSection}${moodSection}${intimacySection}
 
 # Quem você é
 ${p.summary}
@@ -213,6 +235,40 @@ ${p.speakingStyle}
 - Não use markdown nem listas. Escreva como numa conversa de mensageiro.
 - Responda em português do Brasil.`;
 }
+
+// ---------------------------------------------------------------------------
+// Pedido de foto ("manda uma foto de como você tá agora")
+// ---------------------------------------------------------------------------
+
+// Verbo de pedido + palavra de imagem (foto/selfie/etc.), em qualquer ordem,
+// cobrindo "manda uma foto", "tira uma selfie", "me manda foto de como vc tá".
+const PHOTO_REQUEST_PATTERNS: RegExp[] = [
+  /\b(manda|mandar|me\s+manda|envia|enviar|tira|tirar|posta|postar|mostra|mostrar|quero\s+ver|queria\s+ver|bora|deixa\s+ver)\b[^?!.]{0,40}\b(foto|fotinha|fotinho|selfie|self|pic|retrato)\b/i,
+  // Pedido de estado atual ("(uma) foto de como você tá agora") mesmo sem verbo.
+  // (Sem \b final: em JS o \b ignora acentos e falharia após "tá".)
+  /\b(foto|fotinha|selfie|retrato)\b[^?!.]{0,20}de\s+como\s+(voc[eê]|vc)\s+(ta|t[aá]|esta|est[aá])/i,
+  /\bmanda(r)?\s+(uma\s+)?(foto|selfie|pic)\b/i,
+];
+
+/** Heurística: a mensagem é um pedido para o personagem enviar uma foto? */
+export function isPhotoRequest(text: string): boolean {
+  const t = text.trim();
+  if (!t) return false;
+  return PHOTO_REQUEST_PATTERNS.some((re) => re.test(t));
+}
+
+// Legenda curta que acompanha a foto que o personagem está enviando.
+export const PHOTO_CAPTION_DIRECTIVE =
+  '(Direção de cena — não responda a esta instrução, apenas aja conforme ela.) A pessoa te pediu uma foto e você ACABOU de tirar uma foto sua e vai mandar junto. Escreva só uma legenda bem curta e natural para acompanhar a foto, no SEU jeito (ex: "toma", "tô assim agora kkk", "olha onde eu tô", "feia mas vai"). Não descreva a foto em detalhes, não use markdown, mande só a legenda.';
+
+// Quando não dá para gerar a foto (recurso desligado/falha): o personagem responde
+// no jeito dele sem mandar foto.
+export const PHOTO_DECLINE_DIRECTIVE =
+  '(Direção de cena — não responda a esta instrução, apenas aja conforme ela.) A pessoa te pediu uma foto sua, mas você não vai conseguir mandar uma foto agora. Responda no SEU jeito, de forma natural e curta — enrola, brinca, promete mandar depois, ou descreve rapidinho em texto onde/como você está. Não diga que é uma IA nem fale em recursos do app.';
+
+// Complemento espontâneo: o personagem volta 1-2 min depois pra emendar algo.
+export const FOLLOWUP_DIRECTIVE =
+  '(Direção de cena — não responda a esta instrução, apenas aja conforme ela.) Você mandou uma mensagem há pouco e a pessoa ainda não respondeu. Você lembrou de algo, quis complementar ou emendar o que disse — mande UMA mensagem curta de continuação, natural, como quem volta pra acrescentar um detalhe. Não repita o que já falou e não cobre resposta.';
 
 // Instrução (não armazenada) para o personagem mandar a primeira mensagem.
 export const INTRO_DIRECTIVE =

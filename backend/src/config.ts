@@ -6,6 +6,10 @@ export const config = {
   port: Number(process.env.PORT ?? 3000),
   anthropicApiKey: process.env.ANTHROPIC_API_KEY ?? '',
   model: process.env.TALKY_MODEL ?? 'claude-opus-4-7',
+  // Persistência: com MONGODB_URI usa MongoDB; sem ela, cai no arquivo db.json
+  // (apenas para desenvolvimento local). Em produção, defina MONGODB_URI.
+  mongoUri: process.env.MONGODB_URI ?? '',
+  mongoDbName: process.env.MONGODB_DB ?? 'talky',
   // Geração de imagem (foto de perfil) — usa a API de imagens da OpenAI.
   openaiApiKey: process.env.OPENAI_API_KEY ?? '',
   image: {
@@ -53,11 +57,25 @@ export const config = {
     typingWindowSeconds: Number(process.env.REPLY_TYPING_WINDOW_SECONDS ?? 12),
     // Teto do atraso quando o personagem está acordado (minutos).
     maxAwakeMinutes: Number(process.env.REPLY_MAX_AWAKE_MINUTES ?? 30),
+    // Multiplica a duração da "digitação" (proporcional ao tamanho da mensagem).
+    typingSpeedFactor: Number(process.env.REPLY_TYPING_SPEED_FACTOR ?? 1),
   },
   character: {
     // Personagens são GLOBAIS: ao entrar, há esta chance (0-1) de o usuário ser
     // conectado a um personagem que já existe no Talky em vez de criar um novo.
     poolReuseChance: Number(process.env.CHARACTER_POOL_REUSE_CHANCE ?? 0.5),
+  },
+  mood: {
+    // O personagem tem um humor que varia dia a dia (mais animado, triste, etc.).
+    enabled: (process.env.MOOD_ENABLED ?? 'true') !== 'false',
+    // Além da variação diária, as conversas também deslocam o humor. Isso usa uma
+    // chamada leve extra por resposta — desligue para economizar.
+    conversationEffect: (process.env.MOOD_CONVERSATION_EFFECT ?? 'true') !== 'false',
+  },
+  intimacy: {
+    // Controle interno de intimidade por conversa: molda o quanto o personagem
+    // se abre e gera atrito quando o usuário força intimidade cedo demais.
+    enabled: (process.env.INTIMACY_ENABLED ?? 'true') !== 'false',
   },
 };
 

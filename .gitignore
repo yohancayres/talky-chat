@@ -2,3 +2,7 @@ node_modules/
 .DS_Store
 *.log
 .env
+# Config local do ngrok (contém authtoken — nunca versionar)
+ngrok.yml
+# package-lock vazio acidental na raiz (os reais estão em backend/ e mobile/)
+/package-lock.json

@@ -26,12 +26,49 @@ Este repositório contém a **primeira entrega**: o loop principal funcionando.
   como ironia, sarcasmo, passivo-agressividade, doçura, brutalidade, implicância,
   sonhador, ceticismo, nerdice, etc. — variando bastante entre personagens e
   influenciando o tom das conversas.
+- **Humor que muda dia a dia:** além do temperamento (fixo), o personagem tem um
+  **humor** que varia a cada dia — dias mais animados, tristes, pra baixo,
+  cansados, entediados — com viés do próprio temperamento (otimista tende a dias
+  melhores). As **conversas também mudam o humor**: um papo bom anima, um papo
+  pesado deixa pra baixo. O humor entra no tom das respostas e aparece no perfil
+  e ao lado do nome (emoji). Configurável (`MOOD_*`); lógica em
+  `backend/src/mood.ts`.
+- **Intimidade (controle interno):** cada conversa tem um nível de intimidade
+  (0-100, **nunca exibido**) que define o quanto o personagem se abre. Cresce
+  devagar com bom convívio — cada personagem tem uma **taxa de ganho própria**
+  (uns criam laço rápido, outros demoram) — e **cai quando o usuário força
+  intimidade cedo demais** (declaração intensa, assunto íntimo, etc.), gerando
+  atrito/desconforto na própria resposta. A intimidade também influencia o
+  **tempo de resposta** (menos intimidade → demora mais a começar a responder,
+  sempre com um piso de ~1-3s) e a **frequência das mensagens proativas** (mais
+  intimidade → puxa assunto com intervalos bem menores). Configurável
+  (`INTIMACY_ENABLED`); lógica em `backend/src/intimacy.ts`.
+- **Ritmo humano de digitação:** as respostas levam um tempo de "digitando..."
+  proporcional ao tamanho. Cada personagem tem um **estilo de picotar** (0-100):
+  uns mandam tudo numa mensagem, outros quebram em várias com pequenos intervalos
+  — e esse estilo se ajusta se o usuário der feedback ("para de picotar" / "manda
+  uma de cada vez"). Em **assuntos delicados/constrangedores**, a digitação fica
+  **hesitante** (digita, para, volta), como quem pensa e reescreve. Lógica em
+  `backend/src/messaging.ts` e `backend/src/scheduler.ts`.
 - **Personagens globais:** os personagens são únicos e compartilhados entre todos
   os usuários. Ao entrar, você pode "esbarrar" com um personagem que já existe no
   Talky (mesmo nome e identidade) em vez de criar um novo.
 - **Foto de perfil gerada por IA:** ao criar o personagem, o backend resume as
   características dele e pede uma foto de perfil realista à API de imagens da
   OpenAI (`gpt-image-2`). É opcional — sem `OPENAI_API_KEY`, usa o avatar de emoji.
+- **"Manda uma foto":** o usuário pode pedir uma foto no chat ("manda uma foto",
+  "manda uma foto de como vc tá agora", "tira uma selfie de corpo inteiro"). O
+  backend detecta o pedido, deriva a **cena a partir do pedido** (pose,
+  enquadramento, clima) e gera uma **foto contextual** da persona — refletindo o
+  que ela está fazendo agora e o humor —, enviada com uma legenda curta no jeito
+  dela. Sem geração de imagem disponível, o personagem responde em texto.
+  - **Galeria reaproveitável:** cada personagem guarda as fotos já geradas (com
+    descrição). Como os personagens são globais, se **outra pessoa** faz um
+    pedido parecido, o sistema **reenvia uma foto guardada** (sem gerar de novo,
+    economizando). Já a **mesma pessoa nunca recebe a mesma foto duas vezes** —
+    ganha outra (uma guardada que ainda não viu, ou uma nova). A decisão de
+    reusar × gerar é do modelo (`planPhoto` em `backend/src/ai.ts`); a geração e
+    a galeria ficam em `backend/src/image.ts`/`scheduler.ts`.
 - **Múltiplas conversas:** tela de lista (estilo mensageiro) com prévia da última
   mensagem, horário e badge de não lidos. Começa com uma conversa; o botão "+"
   permite conhecer novos contatos. Cada conversa pertence a um usuário (userId),
@@ -53,8 +90,10 @@ O app mobile fala **apenas** com o backend; a chave da Anthropic nunca sai do
 servidor. Toda a inteligência (gerar personagem, responder no chat) acontece no
 backend, na pasta `backend/src/ai.ts` e nos prompts em `backend/src/prompts.ts`.
 
-A persistência é um arquivo JSON simples (`backend/data/db.json`) — suficiente
-para o protótipo; trocar por um banco de dados real quando crescer.
+A persistência usa **MongoDB** quando `MONGODB_URI` está definida (produção); sem
+ela, cai num arquivo JSON (`backend/data/db.json`) — prático para dev local. O
+`store.ts` mantém o estado em memória e grava no banco em *write-through*, então
+o acesso continua síncrono no resto do app. Veja **[Produção](#produção)**.
 
 ## Pré-requisitos
 
@@ -253,6 +292,7 @@ Isso resolve também a geração de foto para personagens **já criados**.
 | `GET`  | `/health`                           | Status do servidor.                          |
 | `POST` | `/api/characters/generate`          | Gera personagem + conversa + 1ª mensagem.    |
 | `GET`  | `/api/conversations/:id`            | Retorna conversa, personagens e histórico.   |
+| `DELETE` | `/api/conversations/:id`          | Exclui a conversa (mantém o personagem no pool). |
 | `GET`  | `/api/conversations/:id/messages?after=<ISO>` | Mensagens novas + status (polling). |
 | `POST` | `/api/conversations/:id/messages`   | Envia mensagem (resposta vem com atraso, via polling). |
 | `POST` | `/api/conversations/:id/push-token` | Registra um token de push (Expo).            |
@@ -261,6 +301,62 @@ Isso resolve também a geração de foto para personagens **já criados**.
 | `GET`  | `/api/users/:userId/conversations`  | Lista as conversas do usuário (prévia + não lidos). |
 | `POST` | `/api/conversations/:id/read`       | Marca a conversa como lida.                  |
 | `POST` | `/api/conversations/:id/claim`      | Associa uma conversa a um usuário.           |
+
+## Produção
+
+### Banco de dados (MongoDB)
+
+Em produção o backend persiste no **MongoDB**. Os dados são *document-shaped*
+(um personagem é um documento com personalidade, temperamento, agenda, humor e
+galeria de fotos), então NoSQL encaixa naturalmente. Defina `MONGODB_URI` e o
+backend usa o Mongo; na primeira execução, se houver um `db.json` antigo, ele é
+**migrado automaticamente**. Sem `MONGODB_URI`, o backend cai no arquivo (dev).
+
+> Arquitetura: estado em memória + *write-through* para o Mongo, mantendo a API
+> síncrona. Isso implica **uma única instância** do backend (o agendador roda em
+> processo). Para escalar horizontalmente no futuro, migrar o `store.ts` para
+> acesso assíncrono e tirar o agendador do processo web.
+
+### Rodar com Docker (local ou VPS)
+
+```bash
+cp .env.example .env            # MONGO_PASSWORD (senha forte), etc.
+cp backend/.env.example backend/.env   # ANTHROPIC_API_KEY, OPENAI_API_KEY, ...
+docker compose up --build -d
+curl http://localhost:3000/health
+```
+
+Sobe `backend` + `mongo` com volumes persistentes (`mongo-data` e `talky-data`
+para avatares/fotos). A porta do Mongo **não** é exposta (fica na rede interna).
+
+### Deploy num VPS — duas opções
+
+**Opção A (recomendada): painel Coolify.** Para um VPS Linux comum, o
+[Coolify](https://coolify.io) (open-source, self-hosted, estilo Heroku) é o mais
+prático: instala com um script, builda a partir do `backend/Dockerfile`, sobe um
+**MongoDB com um clique**, gerencia variáveis de ambiente e dá **HTTPS automático
+(Let's Encrypt)** + **deploy automático no push** via webhook. Nesse caso você
+**não precisa do GitHub Actions** — o painel cuida do build e do deploy.
+Alternativas igualmente boas: **Dokploy** e **EasyPanel** (mesma ideia).
+
+**Opção B: Docker puro + GitHub Actions.** Use o workflow em
+`.github/workflows/deploy.yml`: a cada push na `main`, ele builda a imagem do
+backend, publica no **GHCR** e atualiza o VPS por SSH (`docker compose pull && up`).
+
+No VPS (uma vez): instale Docker + Compose, crie a pasta do app com os dois
+arquivos de ambiente (`.env` e `backend/.env`) e ponha um **proxy reverso com
+HTTPS** na frente (Caddy/Traefik/Nginx). Configure os **secrets** no GitHub:
+
+| Secret | Para quê |
+| ------ | -------- |
+| `VPS_HOST`, `VPS_USER`, `VPS_SSH_KEY` | acesso SSH ao servidor |
+| `VPS_APP_DIR` | pasta no VPS onde fica o `docker-compose.yml` + `.env` |
+| `GHCR_TOKEN` | PAT com `read:packages` para o VPS baixar a imagem |
+
+### Apontar o app para o backend
+
+No build do app (EAS), defina `EXPO_PUBLIC_API_URL` para a **URL https** do
+backend em produção (ver seção do app mobile).
 
 ## Roadmap (visão completa)
 
@@ -293,4 +389,5 @@ A modelagem de dados já foi pensada para suportar grupos com vários personagen
       no mesmo grupo, com personalidades diferentes, inclusive conversando entre
       si (atribuindo o nome de quem fala em cada mensagem).
 - [ ] **Streaming** das respostas para uma sensação de digitação em tempo real.
-- [ ] **Banco de dados** real e autenticação de usuários.
+- [x] **Banco de dados** real (MongoDB) com persistência em produção e Docker.
+- [ ] **Autenticação de usuários** (hoje o `userId` é só o identificador do device).

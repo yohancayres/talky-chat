@@ -4,9 +4,11 @@ import { Character, ChatStatus, Conversation, ConversationSummary, Message } fro
 // http://SEU_IP_LOCAL:3000 definindo EXPO_PUBLIC_API_URL antes de rodar o app.
 const BASE_URL = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:3000';
 
+// timeoutMs <= 0 desliga o timeout — usado em operações longas (ex: gerar
+// personagem + foto de perfil, que pode levar mais de um minuto).
 async function request<T>(path: string, init?: RequestInit, timeoutMs = 30_000): Promise<T> {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const timer = timeoutMs > 0 ? setTimeout(() => controller.abort(), timeoutMs) : null;
   try {
     const res = await fetch(`${BASE_URL}${path}`, {
       ...init,
@@ -30,7 +32,7 @@ async function request<T>(path: string, init?: RequestInit, timeoutMs = 30_000):
     }
     throw err;
   } finally {
-    clearTimeout(timer);
+    if (timer) clearTimeout(timer);
   }
 }
 
@@ -64,10 +66,15 @@ export const api = {
   baseUrl: BASE_URL,
 
   generateCharacter(hint: string, userName: string, userId: string): Promise<GenerateResponse> {
-    return request<GenerateResponse>('/api/characters/generate', {
-      method: 'POST',
-      body: JSON.stringify({ hint, userName, userId }),
-    });
+    // Sem timeout: criar o personagem pode demorar (gera texto + foto de perfil).
+    return request<GenerateResponse>(
+      '/api/characters/generate',
+      {
+        method: 'POST',
+        body: JSON.stringify({ hint, userName, userId }),
+      },
+      0,
+    );
   },
 
   getConversation(id: string): Promise<ConversationResponse> {
@@ -85,6 +92,13 @@ export const api = {
   markRead(conversationId: string): Promise<{ ok: boolean }> {
     return request<{ ok: boolean }>(`/api/conversations/${conversationId}/read`, {
       method: 'POST',
+    });
+  },
+
+  // Exclui a conversa (o personagem permanece no Talky; só some o histórico).
+  deleteConversation(conversationId: string): Promise<{ ok: boolean }> {
+    return request<{ ok: boolean }>(`/api/conversations/${conversationId}`, {
+      method: 'DELETE',
     });
   },
 

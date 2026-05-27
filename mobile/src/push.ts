@@ -4,9 +4,11 @@ import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
 
 // Como a notificação se comporta com o app em primeiro plano.
+// (SDK 54: shouldShowAlert virou shouldShowBanner + shouldShowList.)
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
-    shouldShowAlert: true,
+    shouldShowBanner: true,
+    shouldShowList: true,
     shouldPlaySound: true,
     shouldSetBadge: false,
   }),

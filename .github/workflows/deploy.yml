@@ -1,0 +1,75 @@
+name: Deploy backend
+
+# Faz build da imagem do backend, publica no GHCR e atualiza o VPS via SSH.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'backend/**'
+      - 'docker-compose.yml'
+      - '.github/workflows/deploy.yml'
+  workflow_dispatch: {}
+
+env:
+  # Caminho da imagem no GitHub Container Registry (precisa ser minúsculo).
+  IMAGE: ghcr.io/${{ github.repository_owner }}/talky-backend
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Normaliza o nome da imagem (lowercase)
+        run: echo "IMAGE=${IMAGE,,}" >> "$GITHUB_ENV"
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: ./backend
+          push: true
+          tags: |
+            ${{ env.IMAGE }}:latest
+            ${{ env.IMAGE }}:${{ github.sha }}
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Normaliza o nome da imagem (lowercase)
+        run: echo "IMAGE=${IMAGE,,}" >> "$GITHUB_ENV"
+
+      # Mantém o docker-compose.yml do VPS sempre atualizado.
+      - name: Copia o docker-compose.yml para o VPS
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          source: docker-compose.yml
+          target: ${{ secrets.VPS_APP_DIR }}
+
+      - name: Atualiza e sobe no VPS
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          script: |
+            set -e
+            cd "${{ secrets.VPS_APP_DIR }}"
+            echo "${{ secrets.GHCR_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+            export BACKEND_IMAGE="${{ env.IMAGE }}:latest"
+            docker compose pull backend
+            docker compose up -d
+            docker image prune -f

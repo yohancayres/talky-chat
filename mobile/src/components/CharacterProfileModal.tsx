@@ -73,6 +73,8 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 export function CharacterProfileModal({
   visible,
   character,
+  mood,
+  moodEmoji,
   regeneratingPhoto,
   onRegeneratePhoto,
   onClose,
@@ -80,6 +82,8 @@ export function CharacterProfileModal({
 }: {
   visible: boolean;
   character: Character | null;
+  mood?: string;
+  moodEmoji?: string;
   regeneratingPhoto?: boolean;
   onRegeneratePhoto?: () => void;
   onClose: () => void;
@@ -111,6 +115,14 @@ export function CharacterProfileModal({
             {character.occupation}
             {character.location ? ` · ${character.location}` : ''}
           </Text>
+
+          {mood ? (
+            <View style={styles.moodPill}>
+              <Text style={styles.moodText}>
+                {moodEmoji ? `${moodEmoji} ` : ''}Hoje está {mood}
+              </Text>
+            </View>
+          ) : null}
 
           {onRegeneratePhoto && (
             <Pressable
@@ -192,6 +204,14 @@ const styles = StyleSheet.create({
   avatar: { marginTop: 8 },
   name: { fontSize: 24, fontWeight: '700', color: colors.text, marginTop: 14 },
   subtitle: { fontSize: 15, color: colors.muted, marginTop: 4, textAlign: 'center' },
+  moodPill: {
+    marginTop: 12,
+    backgroundColor: colors.accentSoft,
+    borderRadius: radius.lg,
+    paddingVertical: 6,
+    paddingHorizontal: 14,
+  },
+  moodText: { fontSize: 14, color: colors.accentDark, fontWeight: '600' },
   photoButton: {
     marginTop: 14,
     borderWidth: 1,

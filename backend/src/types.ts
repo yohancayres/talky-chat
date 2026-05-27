@@ -32,6 +32,34 @@ export interface ScheduleBlock {
   responsiveness: Responsiveness;
 }
 
+/**
+ * Humor atual da persona. Varia dia a dia (re-sorteado a cada novo dia, com
+ * viés do temperamento) e também ao longo das conversas.
+ */
+export interface Mood {
+  /** Quão bem se sente: -5 (péssimo/depre) a +5 (ótimo/feliz). */
+  valence: number;
+  /** Energia: -5 (exausto/entediado) a +5 (elétrico/agitado). */
+  energy: number;
+  /** Rótulo curto derivado (ex: "meio pra baixo", "animado", "cansado"). */
+  label: string;
+  /** Motivo curto do humor (ex: "dormiu mal", "conversa boa"). */
+  note?: string;
+  /** Dia (YYYY-MM-DD, hora local) da última rolagem diária. */
+  day: string;
+  updatedAt: string;
+}
+
+/** Uma foto gerada do personagem, guardada para reuso entre conversas. */
+export interface ChatPhoto {
+  id: string;
+  /** Caminho público (ex: "/photos/<id>.png"). */
+  imageUrl: string;
+  /** Descrição da cena (pose, enquadramento, cenário) — usada para casar pedidos. */
+  description: string;
+  createdAt: string;
+}
+
 export interface Character {
   id: string;
   name: string;
@@ -53,6 +81,14 @@ export interface Character {
   temperament: Record<string, number>;
   /** Agenda diária típica — define o que faz e quão disponível está a cada hora. */
   schedule: ScheduleBlock[];
+  /** Humor do dia — muda diariamente e conforme as conversas. */
+  mood?: Mood;
+  /** Galeria de fotos já geradas, reaproveitadas entre conversas. */
+  photoGallery?: ChatPhoto[];
+  /** Taxa de ganho de intimidade (multiplica os ganhos; ~0.4 lento … ~1.8 rápido). */
+  intimacyGain?: number;
+  /** Quanto picota as mensagens (0 = manda tudo junto … 100 = tudo separado). */
+  splitStyle?: number;
   createdAt: string;
 }
 
@@ -66,6 +102,8 @@ export interface Message {
   senderId: string;
   senderName: string;
   text: string;
+  /** Foto enviada na mensagem (ex: "/photos/<id>.png"), quando houver. */
+  imageUrl?: string;
   createdAt: string;
 }
 
@@ -80,6 +118,12 @@ export interface Conversation {
   userId?: string;
   /** Status definido pelo usuário (ex: "em reunião") — vira contexto pro personagem. */
   userStatus?: string;
+  /**
+   * Intimidade (0-100) do personagem com este usuário. Controle INTERNO — nunca
+   * exibido. Cresce devagar com bom convívio; cai quando o usuário força
+   * intimidade cedo demais. Define o quanto o personagem se abre.
+   */
+  intimacy?: number;
   /** Quando o usuário leu a conversa pela última vez (para contagem de não lidos). */
   lastReadAt?: string;
   createdAt: string;

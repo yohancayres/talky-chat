@@ -39,6 +39,8 @@ export interface Message {
   senderId: string;
   senderName: string;
   text: string;
+  /** Foto enviada na mensagem (ex: "/photos/<id>.png"), quando houver. */
+  imageUrl?: string;
   createdAt: string;
 }
 
@@ -57,6 +59,12 @@ export interface ChatStatus {
   typing: boolean;
   photoUrl?: string;
   avatarGenerating?: boolean;
+  /** Humor do dia do personagem (ex: "de bom humor"). */
+  mood?: string;
+  /** Emoji do humor do dia. */
+  moodEmoji?: string;
+  /** O personagem está tirando/enviando uma foto agora. */
+  photoGenerating?: boolean;
 }
 
 /** Resumo de uma conversa para a tela de lista. */

@@ -5,9 +5,13 @@ import { Character } from './types';
 import { describeTemperament } from './prompts';
 
 export const AVATARS_DIR = path.join(__dirname, '..', 'data', 'avatars');
+// Fotos enviadas no chat (contextuais) ficam separadas do avatar de perfil.
+export const PHOTOS_DIR = path.join(__dirname, '..', 'data', 'photos');
 
 // Personagens com foto sendo gerada agora (estado em memória).
 const generatingAvatars = new Set<string>();
+// Conversas com uma foto de chat sendo gerada agora.
+const generatingChatPhotos = new Set<string>();
 
 export function isGeneratingAvatar(characterId: string): boolean {
   return generatingAvatars.has(characterId);
@@ -19,6 +23,18 @@ export function markAvatarGenerating(characterId: string): void {
 
 export function clearAvatarGenerating(characterId: string): void {
   generatingAvatars.delete(characterId);
+}
+
+export function isGeneratingChatPhoto(conversationId: string): boolean {
+  return generatingChatPhotos.has(conversationId);
+}
+
+export function markChatPhotoGenerating(conversationId: string): void {
+  generatingChatPhotos.add(conversationId);
+}
+
+export function clearChatPhotoGenerating(conversationId: string): void {
+  generatingChatPhotos.delete(conversationId);
 }
 
 const SCENES = [
@@ -86,10 +102,82 @@ async function fetchImageBuffer(data: unknown): Promise<Buffer | null> {
   return null;
 }
 
+// Cena/expressão de uma "selfie de agora". Quando há `scene` (descrição derivada
+// do pedido do usuário), ela define pose/enquadramento; senão, usa a atividade.
+function buildChatPhotoPrompt(
+  character: Character,
+  opts: { activity?: string; mood?: string; scene?: string },
+): string {
+  const parts = [
+    'A realistic, casual photo that a fictional adult person (not a real or famous individual) just took with their phone and sent in a chat.',
+    character.appearance
+      ? `Same person, consistent features: ${character.appearance}.`
+      : `A ${character.age}-year-old person.`,
+    `A ${character.age}-year-old ${character.occupation} from ${character.location}, Brazil.`,
+    opts.scene
+      ? `The photo: ${opts.scene}`
+      : opts.activity
+        ? `Right now they are: ${opts.activity} — show them in a fitting setting for that.`
+        : 'Show them in a natural everyday setting.',
+    !opts.scene && opts.mood
+      ? `Their current mood: ${opts.mood} — let it show subtly in the expression.`
+      : '',
+    `Single person, face visible${opts.scene ? '' : `, candid ${pick(ANGLES)}`}.`,
+    'Photorealistic, natural lighting, looks like a genuine spontaneous smartphone photo, not an illustration, not a cartoon, no text overlay.',
+  ];
+  return parts.filter(Boolean).join(' ');
+}
+
+// Chama a API de imagens e devolve o buffer (ou null). Compartilhado por avatar
+// e fotos de chat.
+async function requestImageBuffer(prompt: string, label: string): Promise<Buffer | null> {
+  if (!config.image.enabled || !config.openaiApiKey) return null;
+  console.log(`[talky] gerando ${label} (${config.image.model}, ${config.image.size})...`);
+  const startedAt = Date.now();
+  try {
+    const res = await fetch(config.image.endpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${config.openaiApiKey}`,
+      },
+      body: JSON.stringify({ model: config.image.model, prompt, size: config.image.size }),
+      signal: AbortSignal.timeout(config.image.timeoutSeconds * 1000),
+    });
+    if (!res.ok) {
+      console.warn('[talky] geração de imagem falhou:', res.status, await res.text());
+      return null;
+    }
+    const buffer = await fetchImageBuffer(await res.json());
+    if (!buffer) {
+      console.warn('[talky] resposta de imagem sem dados utilizáveis.');
+      return null;
+    }
+    console.log(`[talky] ${label} gerada em ${((Date.now() - startedAt) / 1000).toFixed(1)}s.`);
+    return buffer;
+  } catch (err) {
+    const timedOut = err instanceof Error && err.name === 'TimeoutError';
+    console.warn(`[talky] erro ao gerar ${label}${timedOut ? ' (timeout)' : ''}:`, err);
+    return null;
+  }
+}
+
+function saveImage(dir: string, fileName: string, buffer: Buffer): void {
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, fileName), buffer);
+}
+
 /** Remove um arquivo de avatar antigo (best-effort), dado o caminho público. */
 export function deleteAvatar(photoUrl?: string): void {
   if (!photoUrl) return;
   const file = path.join(AVATARS_DIR, path.basename(photoUrl));
+  fs.promises.unlink(file).catch(() => {});
+}
+
+/** Remove uma foto enviada no chat (best-effort), dado o caminho público. */
+export function deletePhoto(imageUrl?: string): void {
+  if (!imageUrl) return;
+  const file = path.join(PHOTOS_DIR, path.basename(imageUrl));
   fs.promises.unlink(file).catch(() => {});
 }
 
@@ -102,51 +190,32 @@ export async function generateAvatar(
   character: Character,
   opts: { variation?: boolean } = {},
 ): Promise<string | null> {
-  if (!config.image.enabled || !config.openaiApiKey) return null;
-
-  console.log(
-    `[talky] gerando foto de perfil de ${character.name} (${config.image.model}, ${config.image.size})...`,
+  const buffer = await requestImageBuffer(
+    buildImagePrompt(character, opts.variation ?? false),
+    `foto de perfil de ${character.name}`,
   );
-  const startedAt = Date.now();
+  if (!buffer) return null;
+  const fileName = `${character.id}-${Date.now()}.png`;
+  saveImage(AVATARS_DIR, fileName, buffer);
+  return `/avatars/${fileName}`;
+}
 
-  try {
-    const res = await fetch(config.image.endpoint, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${config.openaiApiKey}`,
-      },
-      body: JSON.stringify({
-        model: config.image.model,
-        prompt: buildImagePrompt(character, opts.variation ?? false),
-        size: config.image.size,
-      }),
-      signal: AbortSignal.timeout(config.image.timeoutSeconds * 1000),
-    });
-
-    if (!res.ok) {
-      console.warn('[talky] geração de imagem falhou:', res.status, await res.text());
-      return null;
-    }
-
-    const buffer = await fetchImageBuffer(await res.json());
-    if (!buffer) {
-      console.warn('[talky] resposta de imagem sem dados utilizáveis.');
-      return null;
-    }
-
-    fs.mkdirSync(AVATARS_DIR, { recursive: true });
-    const fileName = `${character.id}-${Date.now()}.png`;
-    fs.writeFileSync(path.join(AVATARS_DIR, fileName), buffer);
-    console.log(`[talky] foto gerada em ${((Date.now() - startedAt) / 1000).toFixed(1)}s.`);
-    return `/avatars/${fileName}`;
-  } catch (err) {
-    const timedOut = err instanceof Error && err.name === 'TimeoutError';
-    console.warn(
-      `[talky] erro ao gerar foto de perfil${timedOut ? ' (timeout)' : ''}:`,
-      err,
-    );
-    return null;
-  }
+/**
+ * Gera uma foto contextual ("como você está agora") para enviar no chat,
+ * refletindo a atividade atual e o humor. Salva em /photos e retorna o caminho
+ * público, ou null se desabilitado/falhar.
+ */
+export async function generateChatPhoto(
+  character: Character,
+  opts: { activity?: string; mood?: string; scene?: string } = {},
+): Promise<string | null> {
+  const buffer = await requestImageBuffer(
+    buildChatPhotoPrompt(character, opts),
+    `foto de chat de ${character.name}`,
+  );
+  if (!buffer) return null;
+  const fileName = `${character.id}-${Date.now()}.png`;
+  saveImage(PHOTOS_DIR, fileName, buffer);
+  return `/photos/${fileName}`;
 }
 

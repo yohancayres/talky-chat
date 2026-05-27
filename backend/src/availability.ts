@@ -1,4 +1,5 @@
 import { config } from './config';
+import { DEFAULT_INTIMACY, clampIntimacy } from './intimacy';
 import { Character, Responsiveness, ScheduleBlock } from './types';
 
 export type StatusState = 'online' | 'busy' | 'sleeping';
@@ -93,6 +94,19 @@ function isUserActiveHour(activity: number[] | undefined, hour: number): boolean
   return topHours.includes(hour);
 }
 
+/**
+ * Quanto a conversa estar OCIOSA aumenta o tempo de resposta. É uma TENDÊNCIA
+ * aleatória: quanto mais tempo parada, maior o teto do atraso — mas o sorteio
+ * ainda permite respostas rápidas de vez em quando.
+ */
+function idleFactor(idleMs?: number): number {
+  if (!idleMs || idleMs <= 0) return 1;
+  const idleHours = idleMs / 3_600_000;
+  const trend = Math.min(idleHours / 8, 1); // satura em ~8h de silêncio
+  const maxBoost = 3; // até ~4x quando bem ociosa
+  return 1 + trend * maxBoost * Math.random(); // 1x (rápido) .. 1+trend*3 (lento)
+}
+
 // Cauda longa: a maioria das respostas é rápida, algumas demoram minutos.
 function sampleAwakeDelayMs(): number {
   const r = Math.random();
@@ -109,6 +123,8 @@ export function computeReplyDueAt(
   character: Character,
   now: Date,
   userActivityByHour?: number[],
+  intimacy?: number,
+  idleMs?: number,
 ): { dueAt: Date; sleeping: boolean } {
   const schedule = scheduleOf(character);
   const block = currentBlock(schedule, now.getHours());
@@ -117,13 +133,23 @@ export function computeReplyDueAt(
     return { dueAt: nextWake(schedule, now), sleeping: true };
   }
 
+  // Menos intimidade => demora mais pra começar a responder.
+  const lowIntimacy = 1 - clampIntimacy(intimacy ?? DEFAULT_INTIMACY) / 100; // 0 íntimo .. 1 estranho
+  const intimacyMult = 1 + lowIntimacy * 1.8; // ~1.0 (íntimo) .. ~2.8 (estranhos)
+
+  // Mantém o comportamento atual (às vezes demora minutos) e aplica os fatores.
   let ms = sampleAwakeDelayMs();
   if (block.responsiveness === 'away') ms *= randomInt(5, 10);
   else if (block.responsiveness === 'slow') ms *= randomInt(2, 4);
   if (isUserActiveHour(userActivityByHour, now.getHours())) ms *= 0.5;
+  ms *= intimacyMult;
+  ms *= idleFactor(idleMs); // conversa ociosa há muito tempo => tende a demorar mais
   ms *= config.reply.speedFactor;
 
+  // Piso: sempre 1-3s antes de começar a responder; um pouco maior com pouca
+  // intimidade (não é afetado pelo speedFactor, pra valer mesmo em teste).
+  const minMs = Math.round(randomInt(1000, 3000) * (1 + lowIntimacy));
   const maxMs = config.reply.maxAwakeMinutes * 60_000;
-  ms = Math.min(Math.max(ms, 1000), maxMs);
+  ms = Math.min(Math.max(ms, minMs), maxMs);
   return { dueAt: new Date(now.getTime() + ms), sleeping: false };
 }

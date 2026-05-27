@@ -10,10 +10,15 @@ import {
   isGeneratingAvatar,
   markAvatarGenerating,
 } from './image';
-import { INTRO_DIRECTIVE } from './prompts';
+import { recordConversationImpact, refreshDailyMood } from './moodService';
+import { DEFAULT_INTIMACY } from './intimacy';
+import { DEFAULT_SPLIT_STYLE, splitMessages } from './messaging';
+import { INTRO_DIRECTIVE, isPhotoRequest } from './prompts';
 import {
+  bumpSequence,
   getConversationStatus,
   initProactiveForConversation,
+  requestChatPhoto,
   touchProactive,
 } from './scheduler';
 import {
@@ -21,6 +26,7 @@ import {
   addPendingReply,
   addPushToken,
   bumpUserActivity,
+  deleteConversation,
   getCharacter,
   getConversation,
   getMessages,
@@ -55,11 +61,19 @@ function characterMessage(
 // conversa e gera a mensagem de boas-vindas.
 router.post('/characters/generate', async (req, res) => {
   try {
-    const { hint, userName } = req.body ?? {};
+    const { hint, userName, userId } = req.body ?? {};
 
     // Personagens são globais e compartilhados. Com certa probabilidade, o
-    // usuário "esbarra" em um personagem que já existe no Talky.
-    const pool = listCharacters();
+    // usuário "esbarra" em um personagem que já existe no Talky — MAS nunca em
+    // alguém com quem ele já conversa (evita conversa duplicada).
+    const allChars = listCharacters();
+    const userCharIds = new Set(
+      (typeof userId === 'string' ? listConversationsByUser(userId) : []).flatMap(
+        (c) => c.characterIds,
+      ),
+    );
+    const pool = allChars.filter((c) => !userCharIds.has(c.id));
+
     const hasHint = typeof hint === 'string' && hint.trim().length > 0;
     const reuseChance = hasHint
       ? config.character.poolReuseChance * 0.3 // com pedido específico, tende a criar
@@ -72,21 +86,22 @@ router.post('/characters/generate', async (req, res) => {
       character = pool[Math.floor(Math.random() * pool.length)];
       existing = true;
     } else {
-      character = await generateCharacter(hint, userName);
+      // Evita repetir nomes já existentes no Talky (o modelo tende a repetir).
+      const avoidNames = allChars.map((c) => c.name);
+      character = await generateCharacter(hint, userName, avoidNames);
       saveCharacter(character);
     }
 
     // Personagem novo sem foto: gera a foto de perfil (em paralelo com o intro,
     // mais abaixo). Personagem reusado já traz a foto (se tiver).
     const needsPhoto = !existing && !character.photoUrl;
-
-    const { userId } = req.body ?? {};
     const conversation: Conversation = {
       id: randomUUID(),
       title: character.name,
       characterIds: [character.id],
       userName: typeof userName === 'string' ? userName.trim() : undefined,
       userId: typeof userId === 'string' ? userId : undefined,
+      intimacy: DEFAULT_INTIMACY, // começam se conhecendo
       lastReadAt: new Date().toISOString(),
       createdAt: new Date().toISOString(),
     };
@@ -127,6 +142,20 @@ router.get('/conversations/:id', (req, res) => {
     .filter((c): c is Character => Boolean(c));
   const messages = getMessages(conversation.id);
   res.json({ conversation, characters, messages, status: getConversationStatus(conversation.id) });
+});
+
+// Exclui a conversa do usuário. O personagem permanece no pool global (você
+// pode reencontrá-lo depois); só o histórico e os dados desta conversa somem.
+router.delete('/conversations/:id', (req, res) => {
+  const conversation = getConversation(req.params.id);
+  if (!conversation) {
+    res.status(404).json({ error: 'Conversa não encontrada.' });
+    return;
+  }
+  // Não apaga os arquivos de foto: com o reuso de galeria, a mesma foto pode
+  // estar guardada no personagem e no histórico de outras conversas.
+  deleteConversation(conversation.id);
+  res.json({ ok: true });
 });
 
 // Lista as conversas de um usuário (tela de conversas), com prévia e não lidos.
@@ -303,6 +332,12 @@ router.post('/conversations/:id/messages', async (req, res) => {
     }
 
     const now = new Date();
+    // Há quanto tempo a conversa estava parada (antes desta mensagem)? Usado
+    // para o personagem tender a demorar mais quando a conversa fica ociosa.
+    const prior = getMessages(conversation.id);
+    const lastPriorAt = prior.length ? prior[prior.length - 1].createdAt : undefined;
+    const idleMs = lastPriorAt ? now.getTime() - new Date(lastPriorAt).getTime() : undefined;
+
     const userMessage: Message = {
       id: randomUUID(),
       conversationId: conversation.id,
@@ -315,10 +350,24 @@ router.post('/conversations/:id/messages', async (req, res) => {
     addMessage(userMessage);
     bumpUserActivity(conversation.id, now.getHours());
     touchProactive(conversation.id);
+    // Invalida qualquer envio em andamento (partes/follow-up): nova mensagem do
+    // usuário interrompe a sequência atual e faz começar uma nova resposta.
+    bumpSequence(conversation.id);
 
-    const character = getCharacter(conversation.characterIds[0]);
-    if (!character) {
+    const found = getCharacter(conversation.characterIds[0]);
+    if (!found) {
       res.status(500).json({ error: 'Personagem da conversa não encontrado.' });
+      return;
+    }
+    // Mantém o humor do dia atualizado (entra no prompt e no status).
+    const character = refreshDailyMood(found, now);
+
+    // Pedido de foto ("manda uma foto de como você tá agora"): o personagem gera
+    // e envia uma foto contextual em segundo plano (chega via polling/push), em
+    // vez de uma resposta de texto agendada.
+    if (isPhotoRequest(userMessage.text)) {
+      requestChatPhoto(conversation.id, userMessage.text);
+      res.json({ userMessage, replies: [], status: getConversationStatus(conversation.id) });
       return;
     }
 
@@ -326,7 +375,13 @@ router.post('/conversations/:id/messages', async (req, res) => {
     // responde já só com a mensagem do usuário. O app recebe a resposta via polling.
     if (config.reply.enabled) {
       if (!hasPendingReply(conversation.id)) {
-        const { dueAt } = computeReplyDueAt(character, now, getUserActivity(conversation.id));
+        const { dueAt } = computeReplyDueAt(
+          character,
+          now,
+          getUserActivity(conversation.id),
+          conversation.intimacy,
+          idleMs,
+        );
         addPendingReply({
           id: randomUUID(),
           conversationId: conversation.id,
@@ -343,17 +398,34 @@ router.post('/conversations/:id/messages', async (req, res) => {
     const replyText = await generateReply(character, history, {
       userName,
       userStatus: conversation.userStatus,
+      intimacy: conversation.intimacy,
       useWebSearch: config.webSearch.enabled && config.webSearch.inReplies,
     });
-    const replyMessage = characterMessage(conversation.id, character, replyText);
-    addMessage(replyMessage);
+    // Picota conforme o estilo do personagem (sem atraso no modo imediato).
+    const parts = splitMessages(replyText, character.splitStyle ?? DEFAULT_SPLIT_STYLE);
+    const startMs = Date.now();
+    const replies: Message[] = parts.map((text, i) => ({
+      id: randomUUID(),
+      conversationId: conversation.id,
+      role: 'character',
+      senderId: character.id,
+      senderName: character.name,
+      text,
+      createdAt: new Date(startMs + i).toISOString(),
+    }));
+    replies.forEach(addMessage);
     touchProactive(conversation.id);
 
     res.json({
       userMessage,
-      replies: [replyMessage],
+      replies,
       status: getConversationStatus(conversation.id),
     });
+
+    // A conversa desloca o humor e a intimidade (best-effort, após responder).
+    void recordConversationImpact(conversation, character, getMessages(conversation.id)).catch(
+      () => {},
+    );
   } catch (err) {
     console.error('[talky] erro ao responder mensagem:', err);
     res.status(500).json({ error: messageOf(err) });

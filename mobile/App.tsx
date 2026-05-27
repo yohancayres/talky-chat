@@ -156,7 +156,9 @@ export default function App() {
         />
       )}
 
-      {screen.kind === 'list' && userId !== '' && (
+      {/* A lista fica montada atrás do chat: voltar não recarrega (sem refresh)
+          e o swipe revela a lista de verdade (transição fluida). */}
+      {(screen.kind === 'list' || screen.kind === 'chat') && userId !== '' && (
         <ConversationListScreen
           userId={userId}
           onOpen={openConversation}
@@ -165,16 +167,18 @@ export default function App() {
       )}
 
       {screen.kind === 'chat' && (
-        <ChatScreen
-          conversationId={screen.conversationId}
-          character={screen.character}
-          initialMessages={screen.messages}
-          userName={userName}
-          initialStatus={screen.status}
-          initialUserStatus={screen.userStatus}
-          onBack={() => setScreen({ kind: 'list' })}
-          onReset={handleReset}
-        />
+        <View style={StyleSheet.absoluteFill}>
+          <ChatScreen
+            conversationId={screen.conversationId}
+            character={screen.character}
+            initialMessages={screen.messages}
+            userName={userName}
+            initialStatus={screen.status}
+            initialUserStatus={screen.userStatus}
+            onBack={() => setScreen({ kind: 'list' })}
+            onReset={handleReset}
+          />
+        </View>
       )}
 
       {screen.kind === 'error' && (
