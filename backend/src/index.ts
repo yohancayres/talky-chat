@@ -12,7 +12,8 @@ app.use(cors());
 // Limite alto: fotos e áudios enviados pelo usuário chegam em base64 no corpo
 // (base64 infla ~33%). 50 MB cobre fotos + áudios longos (2 min de voz ≈ 3 MB).
 // Ajustável por env (ex.: BODY_LIMIT=80mb) sem precisar mexer no código.
-app.use(express.json({ limit: process.env.BODY_LIMIT ?? '50mb' }));
+const BODY_LIMIT = process.env.BODY_LIMIT ?? '50mb';
+app.use(express.json({ limit: BODY_LIMIT }));
 
 // Fotos de perfil, fotos do personagem e fotos enviadas pelo usuário.
 app.use('/avatars', express.static(AVATARS_DIR));
@@ -20,7 +21,13 @@ app.use('/photos', express.static(PHOTOS_DIR));
 app.use('/uploads', express.static(UPLOADS_DIR));
 
 app.get('/health', (_req, res) => {
-  res.json({ ok: true, model: config.model });
+  // bodyLimit/commit ajudam a confirmar QUAL build está no ar (debug de deploy).
+  res.json({
+    ok: true,
+    model: config.model,
+    bodyLimit: BODY_LIMIT,
+    commit: process.env.SOURCE_COMMIT ?? process.env.COMMIT_SHA ?? 'dev',
+  });
 });
 
 app.use('/api', router);
