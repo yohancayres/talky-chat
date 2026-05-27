@@ -41,6 +41,10 @@ export interface Message {
   text: string;
   /** Foto enviada na mensagem (ex: "/photos/<id>.png"), quando houver. */
   imageUrl?: string;
+  /** Áudio enviado pelo usuário (ex: "/uploads/<id>.m4a"); `text` traz a transcrição. */
+  audioUrl?: string;
+  /** Duração do áudio em milissegundos (para o player). */
+  audioDurationMs?: number;
   createdAt: string;
 }
 
@@ -65,6 +69,8 @@ export interface ChatStatus {
   moodEmoji?: string;
   /** O personagem está tirando/enviando uma foto agora. */
   photoGenerating?: boolean;
+  /** O personagem está gravando um áudio agora. */
+  recordingAudio?: boolean;
 }
 
 /** Resumo de uma conversa para a tela de lista. */

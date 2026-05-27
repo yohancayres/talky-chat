@@ -1,10 +1,35 @@
-import { assessConversationImpact } from './ai';
+import { assessConversationImpact, inferGender } from './ai';
 import { config } from './config';
 import { DEFAULT_INTIMACY, applyIntimacyDelta } from './intimacy';
 import { DEFAULT_SPLIT_STYLE } from './messaging';
 import { applyMoodShift, ensureDailyMood } from './mood';
+import { pickVoiceForProvider, voiceMatchesProvider } from './speech';
 import { getCharacter, getConversation, saveCharacter, saveConversation } from './store';
 import { Character, Conversation, Message } from './types';
+
+/**
+ * Garante que o personagem tem uma voz própria, compatível com o provedor de TTS
+ * ativo (personagens antigos não tinham, ou tinham uma voz de outro provedor).
+ * Atribui pelo timbre inferido e persiste.
+ */
+export async function ensureCharacterVoice(character: Character): Promise<Character> {
+  let fresh = getCharacter(character.id) ?? character;
+  // Garante o gênero (essencial p/ escolher a voz certa) — personagens antigos
+  // podem não tê-lo; aí inferimos uma vez e guardamos.
+  if (!fresh.gender) {
+    const gender = await inferGender(fresh);
+    if (gender) {
+      fresh = { ...fresh, gender };
+      saveCharacter(fresh);
+    }
+  }
+  if (voiceMatchesProvider(fresh.voice)) return fresh;
+  const voice = await pickVoiceForProvider(fresh);
+  if (!voice) return fresh; // não conseguiu (ex: busca de vozes falhou) — segue sem
+  const updated = { ...fresh, voice };
+  saveCharacter(updated);
+  return updated;
+}
 
 // Avalia humor/intimidade a cada N mensagens da conversa (não a cada mensagem),
 // para economizar chamadas ao modelo. Conta o tamanho do histórico desde a

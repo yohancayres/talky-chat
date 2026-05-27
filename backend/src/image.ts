@@ -11,16 +11,28 @@ export const PHOTOS_DIR = path.join(__dirname, '..', 'data', 'photos');
 // Fotos que o USUÁRIO envia para o personagem.
 export const UPLOADS_DIR = path.join(__dirname, '..', 'data', 'uploads');
 
-/** Salva uma imagem enviada pelo usuário (base64) e devolve o caminho público. */
+function extForMediaType(mediaType: string): string {
+  const m = mediaType.toLowerCase();
+  if (m.includes('png')) return 'png';
+  if (m.includes('webp')) return 'webp';
+  if (m.includes('gif')) return 'gif';
+  if (m.includes('m4a') || m.includes('mp4') || m.includes('aac')) return 'm4a';
+  if (m.includes('mpeg') || m.includes('mp3')) return 'mp3';
+  if (m.includes('wav')) return 'wav';
+  if (m.includes('webm')) return 'webm';
+  if (m.includes('ogg') || m.includes('opus')) return 'ogg';
+  return 'jpg';
+}
+
+/** Salva um arquivo enviado pelo usuário (foto ou áudio, base64) e devolve o caminho público. */
 export function saveUpload(base64: string, mediaType: string): string | null {
   try {
-    const ext = mediaType.includes('png') ? 'png' : mediaType.includes('webp') ? 'webp' : 'jpg';
-    const fileName = `${randomUUID()}.${ext}`;
+    const fileName = `${randomUUID()}.${extForMediaType(mediaType)}`;
     fs.mkdirSync(UPLOADS_DIR, { recursive: true });
     fs.writeFileSync(path.join(UPLOADS_DIR, fileName), Buffer.from(base64, 'base64'));
     return `/uploads/${fileName}`;
   } catch (err) {
-    console.warn('[talky] não foi possível salvar a foto enviada:', err);
+    console.warn('[talky] não foi possível salvar o arquivo enviado:', err);
     return null;
   }
 }

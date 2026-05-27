@@ -67,6 +67,8 @@ export interface Character {
   occupation: string;
   location: string;
   avatar: { emoji: string; color: string };
+  /** Gênero do personagem ('female' | 'male'), usado p/ escolher a voz do TTS. */
+  gender?: string;
   /** Descrição física, usada para gerar a foto de perfil. */
   appearance?: string;
   /** Caminho da foto de perfil gerada (ex: "/avatars/<id>.png"), se houver. */
@@ -89,6 +91,8 @@ export interface Character {
   intimacyGain?: number;
   /** Quanto picota as mensagens (0 = manda tudo junto … 100 = tudo separado). */
   splitStyle?: number;
+  /** Voz da OpenAI TTS usada nos áudios do personagem (timbre próprio). */
+  voice?: string;
   createdAt: string;
 }
 
@@ -106,6 +110,12 @@ export interface Message {
   imageUrl?: string;
   /** Descrição (gerada por visão) de uma foto que o USUÁRIO enviou — vai pro contexto. */
   imageDescription?: string;
+  /** Áudio enviado pelo usuário (ex: "/uploads/<id>.m4a"). */
+  audioUrl?: string;
+  /** Duração do áudio em milissegundos (para a UI do player). */
+  audioDurationMs?: number;
+  /** Transcrição do áudio — só vai pro CONTEXTO, nunca é exibida no chat. */
+  audioTranscript?: string;
   createdAt: string;
 }
 
@@ -136,6 +146,8 @@ export interface PendingReply {
   id: string;
   conversationId: string;
   dueAt: string;
+  /** O usuário pediu a resposta em áudio: entregar como mensagem de voz (TTS). */
+  asAudio?: boolean;
   createdAt: string;
 }
 

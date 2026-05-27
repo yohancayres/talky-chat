@@ -1,6 +1,7 @@
 import { randomUUID } from 'crypto';
 import { Router } from 'express';
 import { generateAppearance, generateCharacter, generateReply, interpretImage } from './ai';
+import { transcribeAudio } from './audio';
 import { computeReplyDueAt } from './availability';
 import { config } from './config';
 import {
@@ -11,10 +12,11 @@ import {
   markAvatarGenerating,
   saveUpload,
 } from './image';
-import { recordConversationImpact, refreshDailyMood } from './moodService';
+import { ensureCharacterVoice, recordConversationImpact, refreshDailyMood } from './moodService';
 import { DEFAULT_INTIMACY } from './intimacy';
 import { DEFAULT_SPLIT_STYLE, splitMessages } from './messaging';
-import { INTRO_DIRECTIVE, isPhotoRequest } from './prompts';
+import { AUDIO_REPLY_DIRECTIVE, INTRO_DIRECTIVE, isAudioRequest, isPhotoRequest } from './prompts';
+import { generateSpeech } from './speech';
 import {
   bumpSequence,
   getConversationStatus,
@@ -326,10 +328,11 @@ router.post('/conversations/:id/messages', async (req, res) => {
       return;
     }
 
-    const { text, userName, image } = req.body ?? {};
+    const { text, userName, image, audio } = req.body ?? {};
     const trimmedText = typeof text === 'string' ? text.trim() : '';
     const hasImage = image && typeof image.data === 'string' && image.data.length > 0;
-    if (!trimmedText && !hasImage) {
+    const hasAudio = audio && typeof audio.data === 'string' && audio.data.length > 0;
+    if (!trimmedText && !hasImage && !hasAudio) {
       res.status(400).json({ error: 'Mensagem vazia.' });
       return;
     }
@@ -354,6 +357,22 @@ router.post('/conversations/:id/messages', async (req, res) => {
       }
     }
 
+    // Áudio enviado pelo usuário: salva e transcreve. A transcrição vai SÓ para o
+    // contexto (audioTranscript) — nunca para o texto exibido no chat.
+    let audioUrl: string | undefined;
+    let audioDurationMs: number | undefined;
+    let audioTranscript: string | undefined;
+    if (hasAudio) {
+      const mediaType = typeof audio.mediaType === 'string' ? audio.mediaType : 'audio/m4a';
+      const saved = saveUpload(audio.data, mediaType);
+      if (saved) {
+        audioUrl = saved;
+        const dur = Number(audio.durationMs);
+        audioDurationMs = Number.isFinite(dur) && dur > 0 ? Math.round(dur) : undefined;
+        audioTranscript = (await transcribeAudio(audio.data, mediaType)) || undefined;
+      }
+    }
+
     const userMessage: Message = {
       id: randomUUID(),
       conversationId: conversation.id,
@@ -363,6 +382,9 @@ router.post('/conversations/:id/messages', async (req, res) => {
       text: trimmedText,
       imageUrl,
       imageDescription,
+      audioUrl,
+      audioDurationMs,
+      audioTranscript,
       createdAt: now.toISOString(),
     };
     addMessage(userMessage);
@@ -380,14 +402,19 @@ router.post('/conversations/:id/messages', async (req, res) => {
     // Mantém o humor do dia atualizado (entra no prompt e no status).
     const character = refreshDailyMood(found, now);
 
+    // Pedido por texto OU por voz (transcrição do áudio enviado).
+    const commandText = userMessage.text || audioTranscript || '';
+
     // Pedido de foto ("manda uma foto de como você tá agora"): o personagem gera
-    // e envia uma foto contextual em segundo plano (chega via polling/push), em
-    // vez de uma resposta de texto agendada.
-    if (!hasImage && isPhotoRequest(userMessage.text)) {
-      requestChatPhoto(conversation.id, userMessage.text);
+    // e envia uma foto contextual em segundo plano (chega via polling/push).
+    if (!hasImage && isPhotoRequest(commandText)) {
+      requestChatPhoto(conversation.id, commandText);
       res.json({ userMessage, replies: [], status: getConversationStatus(conversation.id) });
       return;
     }
+
+    // O usuário pediu a resposta em ÁUDIO? Então a resposta será uma nota de voz (TTS).
+    const wantsAudio = isAudioRequest(commandText);
 
     // Atraso humano: agenda a resposta para mais tarde (gerada pelo scheduler) e
     // responde já só com a mensagem do usuário. O app recebe a resposta via polling.
@@ -404,6 +431,7 @@ router.post('/conversations/:id/messages', async (req, res) => {
           id: randomUUID(),
           conversationId: conversation.id,
           dueAt: dueAt.toISOString(),
+          asAudio: wantsAudio,
           createdAt: now.toISOString(),
         });
       }
@@ -418,7 +446,32 @@ router.post('/conversations/:id/messages', async (req, res) => {
       userStatus: conversation.userStatus,
       intimacy: conversation.intimacy,
       useWebSearch: config.webSearch.enabled && config.webSearch.inReplies,
+      directive: wantsAudio ? AUDIO_REPLY_DIRECTIVE : undefined,
     });
+
+    // Pediu áudio: responde com uma nota de voz (TTS), sem picotar.
+    if (wantsAudio) {
+      const voiced = await ensureCharacterVoice(character);
+      const audioUrl = (await generateSpeech(voiced, replyText, { mood: voiced.mood?.label })) ?? undefined;
+      if (audioUrl) {
+        const voiceMsg: Message = {
+          id: randomUUID(),
+          conversationId: conversation.id,
+          role: 'character',
+          senderId: character.id,
+          senderName: character.name,
+          text: replyText,
+          audioUrl,
+          createdAt: new Date().toISOString(),
+        };
+        addMessage(voiceMsg);
+        touchProactive(conversation.id);
+        res.json({ userMessage, replies: [voiceMsg], status: getConversationStatus(conversation.id) });
+        return;
+      }
+      // TTS indisponível/falhou: cai para texto normal abaixo.
+    }
+
     // Picota conforme o estilo do personagem (sem atraso no modo imediato).
     const parts = splitMessages(replyText, character.splitStyle ?? DEFAULT_SPLIT_STYLE);
     const startMs = Date.now();

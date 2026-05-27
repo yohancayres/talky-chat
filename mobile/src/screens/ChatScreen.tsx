@@ -19,6 +19,14 @@ import {
   TextInputKeyPressEventData,
   View,
 } from 'react-native';
+import {
+  AudioModule,
+  RecordingPresets,
+  setAudioModeAsync,
+  useAudioRecorder,
+  useAudioRecorderState,
+} from 'expo-audio';
+import * as FileSystem from 'expo-file-system/legacy';
 import * as ImagePicker from 'expo-image-picker';
 import { api } from '../api';
 import { Avatar } from '../components/Avatar';
@@ -28,7 +36,7 @@ import { TypingIndicator } from '../components/TypingIndicator';
 import { haptics } from '../haptics';
 import { colors, radius, shadow } from '../theme';
 import { Character, ChatStatus, Message } from '../types';
-import { formatDayDivider, isSameDay } from '../time';
+import { formatDayDivider, formatDuration, isSameDay } from '../time';
 
 const USER_STATUS_OPTIONS = [
   'Disponível',
@@ -47,6 +55,7 @@ const GROUP_GAP_MS = 5 * 60 * 1000;
 
 function characterStatusLabel(status: ChatStatus | null, character: Character): string {
   if (!status) return character.occupation || 'toque para ver o perfil';
+  if (status.recordingAudio) return 'gravando áudio...';
   if (status.typing) return 'digitando...';
   if (status.state === 'sleeping') return `${status.activity || 'dormindo'} 💤`;
   if (status.state === 'online') return 'online';
@@ -55,7 +64,7 @@ function characterStatusLabel(status: ChatStatus | null, character: Character): 
 
 function statusDotColor(status: ChatStatus | null): string | null {
   if (!status) return null;
-  if (status.typing || status.state === 'online') return colors.online;
+  if (status.recordingAudio || status.typing || status.state === 'online') return colors.online;
   if (status.state === 'sleeping') return colors.sleeping;
   return colors.busy;
 }
@@ -153,6 +162,11 @@ export function ChatScreen({
     api.markRead(conversationId).catch(() => {});
   }, [conversationId]);
 
+  // Toca áudio mesmo com o iPhone no modo silencioso (causa comum de "sem som").
+  useEffect(() => {
+    setAudioModeAsync({ playsInSilentMode: true }).catch(() => {});
+  }, []);
+
   const scrollToEnd = useCallback((animated = true) => {
     requestAnimationFrame(() => listRef.current?.scrollToEnd({ animated }));
     setShowScrollDown(false);
@@ -222,6 +236,49 @@ export function ChatScreen({
     };
   }, [conversationId, mergeIncoming, scrollToEnd]);
 
+  const audioRecorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
+  const recorderState = useAudioRecorderState(audioRecorder);
+
+  async function startRecording() {
+    try {
+      const perm = await AudioModule.requestRecordingPermissionsAsync();
+      if (!perm.granted) {
+        Alert.alert('Áudio', 'Preciso do microfone para gravar um áudio.');
+        return;
+      }
+      await setAudioModeAsync({ playsInSilentMode: true, allowsRecording: true });
+      await audioRecorder.prepareToRecordAsync();
+      audioRecorder.record();
+      haptics.medium();
+    } catch (e) {
+      Alert.alert('Áudio', e instanceof Error ? e.message : 'Não foi possível gravar.');
+    }
+  }
+
+  async function stopAndSendRecording() {
+    try {
+      const durationMs = Math.round(recorderState.durationMillis ?? 0);
+      await audioRecorder.stop();
+      await setAudioModeAsync({ allowsRecording: false, playsInSilentMode: true });
+      const uri = audioRecorder.uri;
+      if (!uri || durationMs < 700) return; // descarta toques acidentais
+      const base64 = await FileSystem.readAsStringAsync(uri, { encoding: 'base64' });
+      sendRecordedAudio(uri, base64, durationMs);
+    } catch (e) {
+      Alert.alert('Áudio', e instanceof Error ? e.message : 'Não foi possível enviar o áudio.');
+    }
+  }
+
+  async function cancelRecording() {
+    haptics.selection();
+    try {
+      await audioRecorder.stop();
+    } catch {
+      // ignora
+    }
+    await setAudioModeAsync({ allowsRecording: false, playsInSilentMode: true }).catch(() => {});
+  }
+
   async function pickImage() {
     haptics.selection();
     try {
@@ -245,14 +302,19 @@ export function ChatScreen({
     }
   }
 
-  async function handleSend() {
-    const text = draft.trim();
-    const img = attachment;
-    if ((!text && !img) || sending) return;
-
+  // Envio genérico (texto / foto / áudio) com mensagem otimista e troca atômica.
+  async function submitMessage(opts: {
+    text: string;
+    imageUri?: string;
+    audioUri?: string;
+    audioDurationMs?: number;
+    attach?: {
+      image?: { data: string; mediaType: string };
+      audio?: { data: string; mediaType: string; durationMs?: number };
+    };
+  }) {
+    if (sending) return;
     haptics.light();
-    setDraft('');
-    setAttachment(null);
     const optimisticId = `local-${Date.now()}`;
     const optimistic: Message = {
       id: optimisticId,
@@ -260,8 +322,10 @@ export function ChatScreen({
       role: 'user',
       senderId: 'user',
       senderName: userName || 'Você',
-      text,
-      imageUrl: img?.uri, // mostra a foto local até o servidor confirmar
+      text: opts.text,
+      imageUrl: opts.imageUri, // mostra a mídia local até o servidor confirmar
+      audioUrl: opts.audioUri,
+      audioDurationMs: opts.audioDurationMs,
       createdAt: new Date().toISOString(),
     };
     setMessages((prev) => [...prev, optimistic]);
@@ -270,12 +334,7 @@ export function ChatScreen({
     scrollToEnd();
 
     try {
-      const res = await api.sendMessage(
-        conversationId,
-        text,
-        userName,
-        img ? { data: img.base64, mediaType: img.mediaType } : undefined,
-      );
+      const res = await api.sendMessage(conversationId, opts.text, userName, opts.attach);
       const incoming = [res.userMessage, ...res.replies];
       // Troca otimista→confirmada num único render: evita a lista encolher por um
       // instante (o que fazia a visão "subir" no envio).
@@ -322,6 +381,28 @@ export function ChatScreen({
     }
   }
 
+  function handleSend() {
+    const text = draft.trim();
+    const img = attachment;
+    if ((!text && !img) || sending) return;
+    setDraft('');
+    setAttachment(null);
+    void submitMessage({
+      text,
+      imageUri: img?.uri,
+      attach: img ? { image: { data: img.base64, mediaType: img.mediaType } } : undefined,
+    });
+  }
+
+  function sendRecordedAudio(uri: string, base64: string, durationMs: number) {
+    void submitMessage({
+      text: '',
+      audioUri: uri,
+      audioDurationMs: durationMs,
+      attach: { audio: { data: base64, mediaType: 'audio/m4a', durationMs } },
+    });
+  }
+
   async function handleRegeneratePhoto() {
     if (regeneratingPhoto) return;
     haptics.medium();
@@ -365,6 +446,7 @@ export function ChatScreen({
 
   const isTyping = status?.typing ?? false;
   const photoGenerating = status?.photoGenerating ?? false;
+  const recordingAudio = status?.recordingAudio ?? false;
   const dotColor = statusDotColor(status);
   const rows = useMemo(() => buildRows(messages), [messages]);
 
@@ -503,7 +585,14 @@ export function ChatScreen({
             if (atBottomRef.current) scrollToEnd(false);
           }}
           ListFooterComponent={
-            photoGenerating ? (
+            recordingAudio ? (
+              <View style={styles.photoPending}>
+                <Avatar character={character} size={34} />
+                <View style={styles.photoPendingBubble}>
+                  <Text style={styles.photoPendingText}>🎤 gravando áudio…</Text>
+                </View>
+              </View>
+            ) : photoGenerating ? (
               <View style={styles.photoPending}>
                 <Avatar character={character} size={34} />
                 <View style={styles.photoPendingBubble}>
@@ -539,43 +628,75 @@ export function ChatScreen({
         )}
       </View>
 
-      {attachment && (
-        <View style={styles.attachPreview}>
-          <Image source={{ uri: attachment.uri }} style={styles.attachThumb} />
-          <Text style={styles.attachLabel} numberOfLines={1}>
-            Foto anexada
-          </Text>
-          <Pressable onPress={() => setAttachment(null)} hitSlop={10}>
-            <Text style={styles.attachRemove}>✕</Text>
+      {recorderState.isRecording ? (
+        <View style={styles.inputBar}>
+          <Pressable onPress={cancelRecording} hitSlop={10} style={styles.recCancel}>
+            <Text style={styles.recCancelIcon}>✕</Text>
+          </Pressable>
+          <View style={styles.recInfo}>
+            <View style={styles.recDot} />
+            <Text style={styles.recTime}>
+              {formatDuration(recorderState.durationMillis ?? 0)}
+            </Text>
+            <Text style={styles.recHint}>gravando…</Text>
+          </View>
+          <Pressable style={styles.sendButton} onPress={stopAndSendRecording}>
+            <Text style={styles.sendIcon}>➤</Text>
           </Pressable>
         </View>
-      )}
+      ) : (
+        <>
+          {attachment && (
+            <View style={styles.attachPreview}>
+              <Image source={{ uri: attachment.uri }} style={styles.attachThumb} />
+              <Text style={styles.attachLabel} numberOfLines={1}>
+                Foto anexada
+              </Text>
+              <Pressable onPress={() => setAttachment(null)} hitSlop={10}>
+                <Text style={styles.attachRemove}>✕</Text>
+              </Pressable>
+            </View>
+          )}
 
-      <View style={styles.inputBar}>
-        <Pressable style={styles.attachButton} onPress={pickImage} disabled={sending} hitSlop={8}>
-          <Text style={styles.attachIcon}>＋</Text>
-        </Pressable>
-        <TextInput
-          style={styles.input}
-          placeholder={`Mensagem para ${character.name.split(' ')[0]}...`}
-          placeholderTextColor={colors.muted}
-          value={draft}
-          onChangeText={setDraft}
-          onKeyPress={handleKeyPress}
-          blurOnSubmit={false}
-          multiline
-        />
-        <Pressable
-          style={[
-            styles.sendButton,
-            (!draft.trim() && !attachment) || sending ? styles.sendButtonDisabled : null,
-          ]}
-          onPress={handleSend}
-          disabled={(!draft.trim() && !attachment) || sending}
-        >
-          <Text style={styles.sendIcon}>➤</Text>
-        </Pressable>
-      </View>
+          <View style={styles.inputBar}>
+            <Pressable
+              style={styles.attachButton}
+              onPress={pickImage}
+              disabled={sending}
+              hitSlop={8}
+            >
+              <Text style={styles.attachIcon}>＋</Text>
+            </Pressable>
+            <TextInput
+              style={styles.input}
+              placeholder={`Mensagem para ${character.name.split(' ')[0]}...`}
+              placeholderTextColor={colors.muted}
+              value={draft}
+              onChangeText={setDraft}
+              onKeyPress={handleKeyPress}
+              blurOnSubmit={false}
+              multiline
+            />
+            {draft.trim() || attachment ? (
+              <Pressable
+                style={[styles.sendButton, sending && styles.sendButtonDisabled]}
+                onPress={handleSend}
+                disabled={sending}
+              >
+                <Text style={styles.sendIcon}>➤</Text>
+              </Pressable>
+            ) : (
+              <Pressable
+                style={[styles.sendButton, sending && styles.sendButtonDisabled]}
+                onPress={startRecording}
+                disabled={sending}
+              >
+                <Text style={styles.micIcon}>🎤</Text>
+              </Pressable>
+            )}
+          </View>
+        </>
+      )}
 
       <CharacterProfileModal
         visible={profileOpen}
@@ -756,6 +877,18 @@ const styles = StyleSheet.create({
     marginRight: 4,
   },
   attachIcon: { fontSize: 26, color: colors.accent, lineHeight: 28 },
+  micIcon: { fontSize: 20 },
+  recCancel: { width: 40, height: 44, alignItems: 'center', justifyContent: 'center' },
+  recCancelIcon: { fontSize: 18, color: colors.danger, fontWeight: '700' },
+  recInfo: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 8,
+  },
+  recDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: colors.danger, marginRight: 8 },
+  recTime: { fontSize: 16, color: colors.text, fontVariant: ['tabular-nums'], marginRight: 8 },
+  recHint: { fontSize: 14, color: colors.muted },
   input: {
     flex: 1,
     maxHeight: 120,

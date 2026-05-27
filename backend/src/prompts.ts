@@ -75,6 +75,7 @@ Responda SOMENTE com um objeto JSON válido. Sem markdown, sem cercas de código
 {
   "name": string,
   "age": number,
+  "gender": string,                 // "feminino" ou "masculino" (coerente com o nome/personagem)
   "occupation": string,
   "location": string,
   "avatarEmoji": string,            // um único emoji que represente o personagem
@@ -232,6 +233,7 @@ ${p.speakingStyle}
 - Seja consistente com sua personalidade, sua história e o que você já disse antes.
 - Você pode puxar assunto, contar como foi seu dia, comentar sobre seus interesses, perguntar sobre o dia de ${name}, ter opiniões.
 - NUNCA quebre o personagem. Não diga que é uma IA, não fale de "prompts", não ofereça ajuda como um assistente.
+- Quando ${name} manda um ÁUDIO, considere que você ESTÁ OUVINDO (não lendo). O que chega entre colchetes como "[Áudio que mandei, você ouviu: ...]" é o conteúdo falado — pode ter erros, palavras trocadas ou misturar português e inglês. IGNORE esses erros, não comente a transcrição nem corrija palavras; apenas entenda o sentido e responda naturalmente, como quem escutou.
 - Não use markdown nem listas. Escreva como numa conversa de mensageiro.
 - Responda em português do Brasil.`;
 }
@@ -256,6 +258,25 @@ export function isPhotoRequest(text: string): boolean {
   if (!t) return false;
   return PHOTO_REQUEST_PATTERNS.some((re) => re.test(t));
 }
+
+// Pedido para o personagem RESPONDER/MANDAR em áudio (voz).
+// (Sem \b colado em "áudio": em JS o \b ignora o acento de "á" e falharia.)
+const AUDIO_REQUEST_PATTERNS: RegExp[] = [
+  /\b(manda|mandar|me\s+manda|envia|enviar|grava|gravar|responde|responda|responder|fala|falar|pode\s+mandar|quero)\b[^?!.]{0,30}(?:[aá]udio|nota\s+de\s+voz|(?:por|na|em|de)\s+voz|sua\s+voz)/i,
+  /\b(em|por|de)\s+[aá]udio/i,
+  /\bmanda(r)?\s+(um\s+)?[aá]udio/i,
+];
+
+/** Heurística: o usuário pediu a resposta em ÁUDIO (voz)? */
+export function isAudioRequest(text: string): boolean {
+  const t = text.trim();
+  if (!t) return false;
+  return AUDIO_REQUEST_PATTERNS.some((re) => re.test(t));
+}
+
+// Resposta que será enviada como ÁUDIO (TTS): fale natural, sem meta-comentários.
+export const AUDIO_REPLY_DIRECTIVE =
+  '(Direção de cena — não responda a esta instrução, apenas aja conforme ela.) Sua resposta vai ser enviada como um ÁUDIO (nota de voz), automaticamente. Então FALE naturalmente o que você responderia, como num áudio de WhatsApp. NÃO diga que vai mandar um áudio, não diga "peraí"/"deixa eu gravar", não enrole, não comente sobre gravar nem diga que não sabe/não pode mandar áudio. Apenas responda de verdade, no seu jeito.';
 
 // Complemento espontâneo: o personagem volta 1-2 min depois pra emendar algo.
 export const FOLLOWUP_DIRECTIVE =

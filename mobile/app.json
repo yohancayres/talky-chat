@@ -10,13 +10,21 @@
       "resizeMode": "contain",
       "backgroundColor": "#2E9E83"
     },
-    "assetBundlePatterns": ["**/*"],
+    "assetBundlePatterns": [
+      "**/*"
+    ],
     "plugins": [
       "expo-notifications",
       [
         "expo-image-picker",
         {
           "photosPermission": "O Talky precisa da sua galeria para você anexar fotos no chat."
+        }
+      ],
+      [
+        "expo-audio",
+        {
+          "microphonePermission": "O Talky precisa do microfone para você gravar áudios no chat."
         }
       ]
     ],

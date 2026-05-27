@@ -126,6 +126,7 @@ export async function generateCharacter(
     id: randomUUID(),
     name: String(data.name ?? 'Alex'),
     age: Number(data.age ?? 28),
+    gender: normalizeGender(data.gender),
     occupation: String(data.occupation ?? ''),
     location: String(data.location ?? ''),
     avatar: {
@@ -147,12 +148,50 @@ export async function generateCharacter(
     temperament,
     schedule,
     mood: rollDailyMood(undefined, temperament, new Date()),
+    // A voz é atribuída na 1ª vez que o personagem manda áudio (depende do provedor).
     createdAt: new Date().toISOString(),
   };
 }
 
 function clamp(n: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, n));
+}
+
+/** Normaliza qualquer indicação de gênero para 'female' | 'male' | ''. */
+export function normalizeGender(value: unknown): string {
+  const s = String(value ?? '').toLowerCase();
+  if (/femin|female|mulher|garota|mo[çc]a|menina|feminina/.test(s)) return 'female';
+  if (/mascul|\bmale\b|homem|rapaz|garoto|menino/.test(s)) return 'male';
+  return '';
+}
+
+/**
+ * Infere o gênero de um personagem (para escolher a voz do TTS) quando ele não
+ * foi gravado na criação. Chamada leve; '' se incerto.
+ */
+export async function inferGender(character: Character): Promise<string> {
+  try {
+    const resp = await anthropic.messages.create(
+      {
+        model: config.model,
+        max_tokens: 8,
+        system: 'Responda APENAS com uma palavra: "feminino" ou "masculino".',
+        messages: [
+          {
+            role: 'user',
+            content: `O personagem ${character.name}, ${character.age} anos, ${character.occupation}${
+              character.appearance ? `, ${character.appearance}` : ''
+            } — é do gênero feminino ou masculino?`,
+          },
+        ],
+      },
+      { timeout: 15_000, maxRetries: 1 },
+    );
+    return normalizeGender(extractText(resp.content));
+  } catch (err) {
+    console.warn('[talky] não foi possível inferir o gênero:', err);
+    return '';
+  }
 }
 
 // Traços de ESTILO derivados do temperamento (com variação aleatória):
@@ -219,6 +258,11 @@ function buildApiMessages(history: Message[]): ApiMessage[] {
     // Fotos que o usuário enviou entram no contexto como descrição em texto.
     if (m.imageDescription) {
       const note = `[Foto que enviei: ${m.imageDescription}]`;
+      content = content ? `${content}\n${note}` : note;
+    }
+    // Áudios entram como o que foi OUVIDO (transcrição interna, não exibida).
+    if (m.audioTranscript) {
+      const note = `[Áudio que mandei, você ouviu: ${m.audioTranscript}]`;
       content = content ? `${content}\n${note}` : note;
     }
     return { role: m.role === 'user' ? 'user' : 'assistant', content };

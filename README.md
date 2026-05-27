@@ -71,6 +71,20 @@ Este repositório contém a **primeira entrega**: o loop principal funcionando.
   insere essa descrição no contexto — então o personagem **reage ao conteúdo da
   foto** naturalmente. A interpretação é feita uma vez e guardada (`interpretImage`
   em `backend/src/ai.ts`), sem reenviar a imagem a cada turno.
+- **Áudios do usuário:** o usuário **grava um áudio** no chat (botão 🎤) e pode
+  tocá-lo (player no balão). O backend salva, **transcreve** com a OpenAI (Whisper,
+  `backend/src/audio.ts`) e usa a transcrição **só no contexto** (não é exibida) —
+  o personagem reage como se tivesse **ouvido** o áudio, ignorando erros de
+  transcrição/mistura de idiomas. Gravação/reprodução via `expo-audio`.
+- **Personagem manda áudios (TTS):** se o usuário **pedir** ("manda em áudio",
+  "responde por voz" — inclusive falando isso num áudio), o personagem responde
+  com uma **nota de voz**. Provedor configurável: **ElevenLabs** (melhor pt-BR,
+  recomendado — defina `ELEVENLABS_API_KEY`) ou **OpenAI** (`gpt-4o-mini-tts`,
+  fallback). Cada personagem ganha uma **voz própria** (timbre, escolhido por
+  gênero a partir da galeria da conta) e o tom (grave/agudo) + expressividade
+  derivam da personalidade/idade; um **pitch-shift via ffmpeg** afina/engrossa a
+  voz por personagem. Fora isso, ele **nunca** manda áudio. Lógica em
+  `backend/src/speech.ts`.
 - **Múltiplas conversas:** tela de lista (estilo mensageiro) com prévia da última
   mensagem, horário e badge de não lidos. Começa com uma conversa; o botão "+"
   permite conhecer novos contatos. Cada conversa pertence a um usuário (userId),

@@ -1,5 +1,13 @@
 // Helpers de data/hora compartilhados pela lista e pelo chat.
 
+/** Duração em "m:ss" a partir de milissegundos (player/gravação de áudio). */
+export function formatDuration(ms: number): string {
+  const total = Math.max(0, Math.round(ms / 1000));
+  const m = Math.floor(total / 60);
+  const s = total % 60;
+  return `${m}:${String(s).padStart(2, '0')}`;
+}
+
 /** Hora curta: "14:35". */
 export function formatTime(iso: string): string {
   const d = new Date(iso);

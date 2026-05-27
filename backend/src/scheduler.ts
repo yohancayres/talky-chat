@@ -22,9 +22,10 @@ import {
   typingDurationMs,
 } from './messaging';
 import { moodEmoji } from './mood';
-import { recordConversationImpact, refreshDailyMood } from './moodService';
-import { FOLLOWUP_DIRECTIVE } from './prompts';
+import { ensureCharacterVoice, recordConversationImpact, refreshDailyMood } from './moodService';
+import { AUDIO_REPLY_DIRECTIVE, FOLLOWUP_DIRECTIVE } from './prompts';
 import { sendPush } from './push';
+import { generateSpeech } from './speech';
 import {
   addMessage,
   addPendingReply,
@@ -88,6 +89,15 @@ function setLiveTyping(conversationId: string, value: boolean): void {
 }
 function clearLiveTyping(conversationId: string): void {
   liveTyping.delete(conversationId);
+}
+
+// "Gravando áudio..." ao vivo (enquanto gera o TTS) — distinto do "digitando".
+const liveRecording = new Set<string>();
+function setRecording(conversationId: string): void {
+  liveRecording.add(conversationId);
+}
+function clearRecording(conversationId: string): void {
+  liveRecording.delete(conversationId);
 }
 
 // Simula a digitação de uma parte (duração ~ tamanho). Em assunto delicado,
@@ -227,6 +237,42 @@ function lastUserText(history: Message[]): string {
     if (history[i].role === 'user') return history[i].text;
   }
   return '';
+}
+
+/**
+ * Entrega a resposta como uma NOTA DE VOZ (TTS). O texto falado vai no `text`
+ * (entra no contexto), mas o app exibe só o player. Retorna false se o TTS falhar.
+ */
+async function deliverVoiceReply(
+  conversationId: string,
+  characterIn: Character,
+  text: string,
+): Promise<boolean> {
+  // Garante uma voz própria (personagens antigos não tinham → soavam iguais).
+  const character = await ensureCharacterVoice(characterIn);
+  setRecording(conversationId); // mostra "gravando áudio..." (não "digitando")
+  let audioUrl: string | null = null;
+  try {
+    audioUrl = await generateSpeech(character, text, { mood: character.mood?.label });
+  } finally {
+    clearRecording(conversationId);
+  }
+  if (!audioUrl) return false;
+
+  const message: Message = {
+    id: randomUUID(),
+    conversationId,
+    role: 'character',
+    senderId: character.id,
+    senderName: character.name,
+    text, // fica no contexto; o app não exibe (mostra só o player)
+    audioUrl,
+    createdAt: new Date().toISOString(),
+  };
+  addMessage(message);
+  touchProactive(conversationId);
+  await sendPush(getPushTokens(conversationId), character.name, '🎤 Áudio', { conversationId });
+  return true;
 }
 
 const P = config.proactive;
@@ -392,8 +438,22 @@ async function deliverReply(pending: PendingReply): Promise<void> {
       userStatus: conversation.userStatus,
       intimacy: conversation.intimacy,
       useWebSearch: config.webSearch.enabled && config.webSearch.inReplies,
+      // Em áudio: fala natural, sem meta-comentário sobre "mandar áudio".
+      directive: pending.asAudio ? AUDIO_REPLY_DIRECTIVE : undefined,
     });
     if (!text.trim()) return;
+
+    // O usuário pediu áudio: entrega uma NOTA DE VOZ (TTS), sem picotar.
+    if (pending.asAudio) {
+      const delivered = await deliverVoiceReply(conversation.id, character, text);
+      if (delivered) {
+        void recordConversationImpact(conversation, character, getMessages(conversation.id)).catch(
+          () => {},
+        );
+        return;
+      }
+      // TTS indisponível/falhou: cai para a entrega de texto normal abaixo.
+    }
 
     // Entrega em uma ou várias mensagens, com "digitando..." por tamanho
     // (hesitante se o assunto for delicado). Retorna false se foi interrompida.
@@ -579,6 +639,8 @@ export interface ConversationStatus {
   moodEmoji?: string;
   /** O personagem está tirando/enviando uma foto agora. */
   photoGenerating: boolean;
+  /** O personagem está gravando um áudio agora (TTS em geração). */
+  recordingAudio: boolean;
 }
 
 export function getConversationStatus(conversationId: string): ConversationStatus {
@@ -591,6 +653,7 @@ export function getConversationStatus(conversationId: string): ConversationStatu
       typing: false,
       avatarGenerating: false,
       photoGenerating: false,
+      recordingAudio: false,
     };
   }
 
@@ -612,6 +675,7 @@ export function getConversationStatus(conversationId: string): ConversationStatu
     mood: config.mood.enabled ? character.mood?.label : undefined,
     moodEmoji: config.mood.enabled && character.mood ? moodEmoji(character.mood) : undefined,
     photoGenerating: isGeneratingChatPhoto(conversationId),
+    recordingAudio: liveRecording.has(conversationId),
   };
 }
 

@@ -10,8 +10,43 @@ export const config = {
   // (apenas para desenvolvimento local). Em produção, defina MONGODB_URI.
   mongoUri: process.env.MONGODB_URI ?? '',
   mongoDbName: process.env.MONGODB_DB ?? 'talky',
-  // Geração de imagem (foto de perfil) — usa a API de imagens da OpenAI.
+  // Imagens e transcrição de áudio usam a OpenAI.
   openaiApiKey: process.env.OPENAI_API_KEY ?? '',
+  audio: {
+    // Transcrição de áudios enviados pelo usuário (Whisper/OpenAI).
+    transcribeModel: process.env.OPENAI_TRANSCRIBE_MODEL ?? 'whisper-1',
+    transcribeEndpoint:
+      process.env.OPENAI_TRANSCRIBE_ENDPOINT ?? 'https://api.openai.com/v1/audio/transcriptions',
+    timeoutSeconds: Number(process.env.AUDIO_TRANSCRIBE_TIMEOUT_SECONDS ?? 60),
+  },
+  tts: {
+    // O personagem manda áudios — só quando o usuário pede.
+    enabled: (process.env.TTS_ENABLED ?? 'true') !== 'false',
+    // Provedor: 'elevenlabs' (melhor pt-BR) ou 'openai'. Padrão: ElevenLabs se
+    // houver ELEVENLABS_API_KEY; senão, OpenAI.
+    provider: process.env.TTS_PROVIDER ?? (process.env.ELEVENLABS_API_KEY ? 'elevenlabs' : 'openai'),
+    timeoutSeconds: Number(process.env.TTS_TIMEOUT_SECONDS ?? 60),
+    // Pitch-shift real via ffmpeg (afina/engrossa a voz por personagem).
+    // Requer ffmpeg instalado; sem ele, usa o áudio original.
+    pitchShift: (process.env.TTS_PITCH_SHIFT ?? 'true') !== 'false',
+    // Ambiente do áudio: 'room' (quarto), 'office' (escritório) ou 'off'/'false'.
+    ambience: (process.env.TTS_AMBIENCE ?? 'room').toLowerCase(),
+    // Hesitações/pausas naturais ("hmm...", "é...") inseridas no texto falado.
+    fillers: (process.env.TTS_FILLERS ?? 'true') !== 'false',
+    openai: {
+      // gpt-4o-mini-tts aceita "instructions" (tom/emoção pela personalidade).
+      model: process.env.OPENAI_TTS_MODEL ?? 'gpt-4o-mini-tts',
+      endpoint: process.env.OPENAI_TTS_ENDPOINT ?? 'https://api.openai.com/v1/audio/speech',
+      defaultVoice: process.env.OPENAI_TTS_VOICE ?? 'alloy',
+    },
+    elevenlabs: {
+      apiKey: process.env.ELEVENLABS_API_KEY ?? '',
+      model: process.env.ELEVENLABS_MODEL ?? 'eleven_multilingual_v2',
+      baseUrl: process.env.ELEVENLABS_BASE_URL ?? 'https://api.elevenlabs.io/v1',
+      // Voz fixa de fallback (id), caso a busca de vozes da conta falhe.
+      defaultVoice: process.env.ELEVENLABS_VOICE ?? '',
+    },
+  },
   image: {
     enabled: (process.env.IMAGE_GEN_ENABLED ?? 'true') !== 'false',
     model: process.env.TALKY_IMAGE_MODEL ?? 'gpt-image-2',

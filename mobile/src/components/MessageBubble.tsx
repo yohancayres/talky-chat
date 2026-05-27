@@ -1,11 +1,59 @@
+import { useAudioPlayer, useAudioPlayerStatus } from 'expo-audio';
 import React, { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Animated, Image, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Animated, Image, Pressable, StyleSheet, Text, View } from 'react-native';
 import { api } from '../api';
 import { haptics } from '../haptics';
 import { colors, radius } from '../theme';
-import { formatTime } from '../time';
+import { formatDuration, formatTime } from '../time';
 import { Character, Message } from '../types';
 import { Avatar } from './Avatar';
+
+function toUri(url: string): string {
+  return /^(https?:|file:|data:|blob:|content:)/.test(url) ? url : `${api.baseUrl}${url}`;
+}
+
+// Player simples para áudios enviados pelo usuário (play/pause + duração).
+function AudioMessage({
+  url,
+  durationMs,
+  tint,
+  textColor,
+}: {
+  url: string;
+  durationMs?: number;
+  tint: string;
+  textColor: string;
+}) {
+  const player = useAudioPlayer({ uri: toUri(url) });
+  const status = useAudioPlayerStatus(player);
+  const playing = status.playing;
+
+  const totalSec = status.duration || (durationMs ? durationMs / 1000 : 0);
+  const curSec = playing || status.currentTime ? status.currentTime : 0;
+  const label = formatDuration((curSec || totalSec) * 1000);
+
+  function toggle() {
+    haptics.selection();
+    if (playing) {
+      player.pause();
+    } else {
+      if (status.didJustFinish || (totalSec && status.currentTime >= totalSec - 0.1)) {
+        player.seekTo(0);
+      }
+      player.play();
+    }
+  }
+
+  return (
+    <Pressable style={styles.audioRow} onPress={toggle} hitSlop={6}>
+      <View style={[styles.audioPlay, { borderColor: tint }]}>
+        <Text style={[styles.audioPlayIcon, { color: tint }]}>{playing ? '⏸' : '▶'}</Text>
+      </View>
+      <Text style={[styles.audioWave, { color: textColor }]}>▁▂▃▅▇▅▃▂▁▂▃</Text>
+      <Text style={[styles.audioTime, { color: textColor }]}>{label}</Text>
+    </Pressable>
+  );
+}
 
 // Foto enviada na mensagem, com indicador de carregamento e fallback.
 function ImageAttachment({ url, tint }: { url: string; tint: string }) {
@@ -65,6 +113,7 @@ export function MessageBubble({
 }) {
   const isUser = message.role === 'user';
   const hasImage = Boolean(message.imageUrl);
+  const hasAudio = Boolean(message.audioUrl);
   const anim = useRef(new Animated.Value(animateIn ? 0 : 1)).current;
 
   useEffect(() => {
@@ -101,7 +150,15 @@ export function MessageBubble({
           ]}
         >
           {hasImage && <ImageAttachment url={message.imageUrl!} tint="#FFFFFF" />}
-          {message.text ? (
+          {hasAudio && (
+            <AudioMessage
+              url={message.audioUrl!}
+              durationMs={message.audioDurationMs}
+              tint="#FFFFFF"
+              textColor="rgba(255,255,255,0.9)"
+            />
+          )}
+          {message.text && !hasAudio ? (
             <Text style={[styles.userText, hasImage && styles.textBelowImage]}>{message.text}</Text>
           ) : null}
           <View style={styles.metaRow}>
@@ -137,7 +194,15 @@ export function MessageBubble({
         ]}
       >
         {hasImage && <ImageAttachment url={message.imageUrl!} tint={colors.accent} />}
-        {message.text ? (
+        {hasAudio && (
+          <AudioMessage
+            url={message.audioUrl!}
+            durationMs={message.audioDurationMs}
+            tint={colors.accent}
+            textColor={colors.charBubbleText}
+          />
+        )}
+        {message.text && !hasAudio ? (
           <Text style={[styles.charText, hasImage && styles.textBelowImage]}>{message.text}</Text>
         ) : null}
         {time ? <Text style={styles.charTime}>{time}</Text> : null}
@@ -196,6 +261,19 @@ const styles = StyleSheet.create({
   imageLoading: { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center' },
   imageFallback: { alignItems: 'center', justifyContent: 'center' },
   imageFallbackText: { color: colors.muted, fontSize: 13 },
+  audioRow: { flexDirection: 'row', alignItems: 'center', minWidth: 160, paddingVertical: 2 },
+  audioPlay: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    borderWidth: 1.5,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 8,
+  },
+  audioPlayIcon: { fontSize: 13 },
+  audioWave: { flex: 1, fontSize: 13, letterSpacing: 1, opacity: 0.8 },
+  audioTime: { fontSize: 12, marginLeft: 8, fontVariant: ['tabular-nums'] },
   metaRow: {
     flexDirection: 'row',
     alignItems: 'center',
