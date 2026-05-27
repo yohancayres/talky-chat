@@ -1,9 +1,9 @@
 import { randomUUID } from 'crypto';
 import {
+  decidePhotoResponse,
   generateNewsMessage,
   generateProactiveMessage,
   generateReply,
-  planPhoto,
 } from './ai';
 import { computeReplyDueAt, currentPresence } from './availability';
 import { config } from './config';
@@ -23,7 +23,7 @@ import {
 } from './messaging';
 import { moodEmoji } from './mood';
 import { recordConversationImpact, refreshDailyMood } from './moodService';
-import { FOLLOWUP_DIRECTIVE, PHOTO_CAPTION_DIRECTIVE, PHOTO_DECLINE_DIRECTIVE } from './prompts';
+import { FOLLOWUP_DIRECTIVE } from './prompts';
 import { sendPush } from './push';
 import {
   addMessage,
@@ -456,9 +456,6 @@ function processPendingReplies(): void {
  * geração de imagem estiver indisponível/falhar, o personagem responde em texto.
  */
 export function requestChatPhoto(conversationId: string, requestText: string): void {
-  const canPhoto = config.image.enabled && !!config.openaiApiKey;
-  if (canPhoto) markChatPhotoGenerating(conversationId);
-
   void (async () => {
     try {
       const conversation = getConversation(conversationId);
@@ -467,114 +464,101 @@ export function requestChatPhoto(conversationId: string, requestText: string): v
       if (!found) return;
       const character = refreshDailyMood(found);
       const history = getMessages(conversationId);
-      const ctx = {
-        userName: conversation.userName,
-        userStatus: conversation.userStatus,
-        intimacy: conversation.intimacy,
-      };
+      const ctx = { userName: conversation.userName, intimacy: conversation.intimacy };
+      const moodLabel = character.mood?.label;
 
-      const base = {
+      // Fotos já enviadas NESTA conversa não são reusadas (a mesma pessoa sempre
+      // recebe uma diferente). As demais da galeria são candidatas a reuso.
+      const sentUrls = new Set(
+        history.map((m) => m.imageUrl).filter((u): u is string => Boolean(u)),
+      );
+      const gallery = character.photoGallery ?? [];
+      const candidates = gallery.filter((p) => !sentUrls.has(p.imageUrl));
+
+      // 1) O PERSONAGEM interpreta o pedido e decide, em personagem, se manda.
+      const decision = await decidePhotoResponse(
+        character,
+        history,
+        requestText,
+        candidates.map((p) => ({ id: p.id, description: p.description })),
+        { userName: conversation.userName, intimacy: conversation.intimacy, mood: moodLabel },
+      );
+
+      // 2a) Não quis mandar → responde em TEXTO, no jeito dele (entrega natural).
+      if (!decision.send) {
+        const text =
+          decision.text || (await generateReply(character, history, ctx)); // fallback se vazio
+        if (text.trim()) {
+          await emitMessages(conversationId, character, text, { lastUserText: requestText });
+        }
+        void recordConversationImpact(conversation, character, getMessages(conversationId)).catch(
+          () => {},
+        );
+        return;
+      }
+
+      // 2b) Vai mandar → reusa uma foto guardada ou gera uma nova com o contexto.
+      const reused = decision.reuseId ? gallery.find((p) => p.id === decision.reuseId) : undefined;
+      let imageUrl: string | null = reused?.imageUrl ?? null;
+
+      if (!imageUrl) {
+        const presence = currentPresence(character, new Date());
+        markChatPhotoGenerating(conversationId);
+        try {
+          imageUrl = await generateChatPhoto(character, {
+            activity: presence.activity,
+            mood: moodLabel,
+            scene: decision.scene,
+          });
+        } finally {
+          clearChatPhotoGenerating(conversationId);
+        }
+        if (imageUrl) {
+          const photo: ChatPhoto = {
+            id: randomUUID(),
+            imageUrl,
+            description: decision.scene?.trim() || presence.activity || 'foto casual',
+            createdAt: new Date().toISOString(),
+          };
+          // Mantém só as últimas MAX_GALLERY no pool de reuso (sem apagar arquivos).
+          const next = [...gallery, photo];
+          const pruned = next.slice(Math.max(0, next.length - MAX_GALLERY));
+          const fresh = getCharacter(character.id);
+          if (fresh) saveCharacter({ ...fresh, photoGallery: pruned });
+        }
+      }
+
+      const caption = decision.text.trim();
+
+      // Quis mandar mas a imagem falhou: ainda assim responde em texto (não fica mudo).
+      if (!imageUrl) {
+        if (caption) await emitMessages(conversationId, character, caption, { lastUserText: requestText });
+        void recordConversationImpact(conversation, character, getMessages(conversationId)).catch(
+          () => {},
+        );
+        return;
+      }
+
+      const message: Message = {
         id: randomUUID(),
         conversationId,
-        role: 'character' as const,
+        role: 'character',
         senderId: character.id,
         senderName: character.name,
+        text: caption,
+        imageUrl,
+        createdAt: new Date().toISOString(),
       };
-
-      let message: Message | null = null;
-      if (canPhoto) {
-        const presence = currentPresence(character, new Date());
-        const moodLabel = character.mood?.label;
-
-        // Fotos já enviadas NESTA conversa não são reusadas (a mesma pessoa
-        // sempre recebe uma diferente). As demais da galeria são candidatas.
-        const sentUrls = new Set(
-          getMessages(conversationId)
-            .map((m) => m.imageUrl)
-            .filter((u): u is string => Boolean(u)),
-        );
-        const gallery = character.photoGallery ?? [];
-        const candidates = gallery.filter((p) => !sentUrls.has(p.imageUrl));
-
-        // O modelo decide: reusar uma foto guardada ou descrever uma nova cena.
-        const plan = await planPhoto(
-          character,
-          requestText,
-          candidates.map((p) => ({ id: p.id, description: p.description })),
-          { activity: presence.activity, mood: moodLabel },
-        );
-
-        const reused = plan.reuseId ? gallery.find((p) => p.id === plan.reuseId) : undefined;
-        let imageUrl: string | null = null;
-        let caption = '';
-
-        if (reused) {
-          // Reuso: manda a mesma foto (sem gerar), com uma legenda nova no jeito dele.
-          console.log(`[talky] reusando foto guardada de ${character.name} (galeria).`);
-          imageUrl = reused.imageUrl;
-          caption = await generateReply(character, history, {
-            ...ctx,
-            directive: PHOTO_CAPTION_DIRECTIVE,
-          });
-        } else {
-          // Nova foto: gera, guarda na galeria e poda as mais antigas.
-          const [cap, newUrl] = await Promise.all([
-            generateReply(character, history, { ...ctx, directive: PHOTO_CAPTION_DIRECTIVE }),
-            generateChatPhoto(character, {
-              activity: presence.activity,
-              mood: moodLabel,
-              scene: plan.scene,
-            }),
-          ]);
-          caption = cap;
-          imageUrl = newUrl;
-          if (newUrl) {
-            const photo: ChatPhoto = {
-              id: randomUUID(),
-              imageUrl: newUrl,
-              description: plan.scene?.trim() || presence.activity || 'foto casual',
-              createdAt: new Date().toISOString(),
-            };
-            // Mantém só as últimas MAX_GALLERY no pool de reuso. NÃO apaga os
-            // arquivos: a mesma foto pode estar no histórico de várias conversas.
-            const next = [...gallery, photo];
-            const pruned = next.slice(Math.max(0, next.length - MAX_GALLERY));
-            const fresh = getCharacter(character.id);
-            if (fresh) saveCharacter({ ...fresh, photoGallery: pruned });
-          }
-        }
-
-        if (imageUrl) {
-          // createdAt no momento da entrega (a geração pode levar segundos).
-          message = { ...base, text: caption.trim(), imageUrl, createdAt: new Date().toISOString() };
-        }
-      }
-
-      if (!message) {
-        // Sem foto (recurso off ou falha): responde em texto, no jeito dele.
-        const declineText = await generateReply(character, history, {
-          ...ctx,
-          directive: PHOTO_DECLINE_DIRECTIVE,
-        });
-        if (!declineText.trim()) return;
-        message = { ...base, text: declineText.trim(), createdAt: new Date().toISOString() };
-      }
-
       addMessage(message);
       touchProactive(conversationId);
-      await sendPush(
-        getPushTokens(conversationId),
-        character.name,
-        message.imageUrl ? `📷 ${message.text || 'Foto'}` : message.text,
-        { conversationId },
-      );
+      await sendPush(getPushTokens(conversationId), character.name, `📷 ${caption || 'Foto'}`, {
+        conversationId,
+      });
       void recordConversationImpact(conversation, character, getMessages(conversationId)).catch(
         () => {},
       );
     } catch (err) {
-      console.error('[talky] erro ao gerar foto de chat:', err);
-    } finally {
-      if (canPhoto) clearChatPhotoGenerating(conversationId);
+      console.error('[talky] erro ao responder pedido de foto:', err);
     }
   })();
 }

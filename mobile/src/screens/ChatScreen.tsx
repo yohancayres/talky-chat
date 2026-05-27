@@ -5,6 +5,7 @@ import {
   AppState,
   Dimensions,
   FlatList,
+  Image,
   KeyboardAvoidingView,
   NativeScrollEvent,
   NativeSyntheticEvent,
@@ -18,6 +19,7 @@ import {
   TextInputKeyPressEventData,
   View,
 } from 'react-native';
+import * as ImagePicker from 'expo-image-picker';
 import { api } from '../api';
 import { Avatar } from '../components/Avatar';
 import { CharacterProfileModal } from '../components/CharacterProfileModal';
@@ -128,6 +130,11 @@ export function ChatScreen({
   const [messages, setMessages] = useState<Message[]>(initialMessages);
   const [pendingIds, setPendingIds] = useState<Set<string>>(new Set());
   const [draft, setDraft] = useState('');
+  const [attachment, setAttachment] = useState<{
+    uri: string;
+    base64: string;
+    mediaType: string;
+  } | null>(null);
   const [sending, setSending] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const [status, setStatus] = useState<ChatStatus | null>(initialStatus ?? null);
@@ -215,12 +222,37 @@ export function ChatScreen({
     };
   }, [conversationId, mergeIncoming, scrollToEnd]);
 
+  async function pickImage() {
+    haptics.selection();
+    try {
+      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!perm.granted) {
+        Alert.alert('Fotos', 'Preciso de acesso à galeria para anexar uma foto.');
+        return;
+      }
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'],
+        quality: 0.5, // comprime: a foto vai em base64 e ainda passa por visão
+        base64: true,
+      });
+      if (result.canceled || !result.assets?.length) return;
+      const asset = result.assets[0];
+      if (!asset.base64) return;
+      const mediaType = asset.mimeType || 'image/jpeg';
+      setAttachment({ uri: asset.uri, base64: asset.base64, mediaType });
+    } catch (e) {
+      Alert.alert('Fotos', e instanceof Error ? e.message : 'Não foi possível abrir a galeria.');
+    }
+  }
+
   async function handleSend() {
     const text = draft.trim();
-    if (!text || sending) return;
+    const img = attachment;
+    if ((!text && !img) || sending) return;
 
     haptics.light();
     setDraft('');
+    setAttachment(null);
     const optimisticId = `local-${Date.now()}`;
     const optimistic: Message = {
       id: optimisticId,
@@ -229,6 +261,7 @@ export function ChatScreen({
       senderId: 'user',
       senderName: userName || 'Você',
       text,
+      imageUrl: img?.uri, // mostra a foto local até o servidor confirmar
       createdAt: new Date().toISOString(),
     };
     setMessages((prev) => [...prev, optimistic]);
@@ -237,7 +270,12 @@ export function ChatScreen({
     scrollToEnd();
 
     try {
-      const res = await api.sendMessage(conversationId, text, userName);
+      const res = await api.sendMessage(
+        conversationId,
+        text,
+        userName,
+        img ? { data: img.base64, mediaType: img.mediaType } : undefined,
+      );
       const incoming = [res.userMessage, ...res.replies];
       // Troca otimista→confirmada num único render: evita a lista encolher por um
       // instante (o que fazia a visão "subir" no envio).
@@ -501,7 +539,22 @@ export function ChatScreen({
         )}
       </View>
 
+      {attachment && (
+        <View style={styles.attachPreview}>
+          <Image source={{ uri: attachment.uri }} style={styles.attachThumb} />
+          <Text style={styles.attachLabel} numberOfLines={1}>
+            Foto anexada
+          </Text>
+          <Pressable onPress={() => setAttachment(null)} hitSlop={10}>
+            <Text style={styles.attachRemove}>✕</Text>
+          </Pressable>
+        </View>
+      )}
+
       <View style={styles.inputBar}>
+        <Pressable style={styles.attachButton} onPress={pickImage} disabled={sending} hitSlop={8}>
+          <Text style={styles.attachIcon}>＋</Text>
+        </Pressable>
         <TextInput
           style={styles.input}
           placeholder={`Mensagem para ${character.name.split(' ')[0]}...`}
@@ -513,9 +566,12 @@ export function ChatScreen({
           multiline
         />
         <Pressable
-          style={[styles.sendButton, (!draft.trim() || sending) && styles.sendButtonDisabled]}
+          style={[
+            styles.sendButton,
+            (!draft.trim() && !attachment) || sending ? styles.sendButtonDisabled : null,
+          ]}
           onPress={handleSend}
-          disabled={!draft.trim() || sending}
+          disabled={(!draft.trim() && !attachment) || sending}
         >
           <Text style={styles.sendIcon}>➤</Text>
         </Pressable>
@@ -670,6 +726,18 @@ const styles = StyleSheet.create({
     borderColor: colors.surface,
   },
   scrollDownBadgeText: { color: '#FFFFFF', fontSize: 11, fontWeight: '700' },
+  attachPreview: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    backgroundColor: colors.surface,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+  },
+  attachThumb: { width: 40, height: 40, borderRadius: 8, backgroundColor: colors.border },
+  attachLabel: { flex: 1, marginLeft: 10, fontSize: 14, color: colors.text },
+  attachRemove: { fontSize: 16, color: colors.muted, paddingHorizontal: 6, fontWeight: '700' },
   inputBar: {
     flexDirection: 'row',
     alignItems: 'flex-end',
@@ -680,6 +748,14 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: colors.border,
   },
+  attachButton: {
+    width: 40,
+    height: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 4,
+  },
+  attachIcon: { fontSize: 26, color: colors.accent, lineHeight: 28 },
   input: {
     flex: 1,
     maxHeight: 120,

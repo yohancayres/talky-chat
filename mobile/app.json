@@ -11,7 +11,15 @@
       "backgroundColor": "#2E9E83"
     },
     "assetBundlePatterns": ["**/*"],
-    "plugins": ["expo-notifications"],
+    "plugins": [
+      "expo-notifications",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "O Talky precisa da sua galeria para você anexar fotos no chat."
+        }
+      ]
+    ],
     "ios": {
       "supportsTablet": true
     },

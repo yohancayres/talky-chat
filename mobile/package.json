@@ -21,6 +21,7 @@
     "expo-file-system": "~19.0.22",
     "expo-font": "~14.0.11",
     "expo-haptics": "~15.0.8",
+    "expo-image-picker": "~17.0.11",
     "expo-keep-awake": "~15.0.8",
     "expo-notifications": "~0.32.17",
     "expo-status-bar": "~3.0.9",

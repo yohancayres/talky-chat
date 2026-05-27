@@ -1,6 +1,6 @@
 import { randomUUID } from 'crypto';
 import { Router } from 'express';
-import { generateAppearance, generateCharacter, generateReply } from './ai';
+import { generateAppearance, generateCharacter, generateReply, interpretImage } from './ai';
 import { computeReplyDueAt } from './availability';
 import { config } from './config';
 import {
@@ -9,6 +9,7 @@ import {
   generateAvatar,
   isGeneratingAvatar,
   markAvatarGenerating,
+  saveUpload,
 } from './image';
 import { recordConversationImpact, refreshDailyMood } from './moodService';
 import { DEFAULT_INTIMACY } from './intimacy';
@@ -325,8 +326,10 @@ router.post('/conversations/:id/messages', async (req, res) => {
       return;
     }
 
-    const { text, userName } = req.body ?? {};
-    if (!text || !String(text).trim()) {
+    const { text, userName, image } = req.body ?? {};
+    const trimmedText = typeof text === 'string' ? text.trim() : '';
+    const hasImage = image && typeof image.data === 'string' && image.data.length > 0;
+    if (!trimmedText && !hasImage) {
       res.status(400).json({ error: 'Mensagem vazia.' });
       return;
     }
@@ -338,13 +341,28 @@ router.post('/conversations/:id/messages', async (req, res) => {
     const lastPriorAt = prior.length ? prior[prior.length - 1].createdAt : undefined;
     const idleMs = lastPriorAt ? now.getTime() - new Date(lastPriorAt).getTime() : undefined;
 
+    // Foto enviada pelo usuário: salva e interpreta (visão) para entrar no contexto.
+    let imageUrl: string | undefined;
+    let imageDescription: string | undefined;
+    if (hasImage) {
+      const mediaType = typeof image.mediaType === 'string' ? image.mediaType : 'image/jpeg';
+      const saved = saveUpload(image.data, mediaType);
+      if (saved) {
+        imageUrl = saved;
+        imageDescription =
+          (await interpretImage(image.data, mediaType, trimmedText || undefined)) || undefined;
+      }
+    }
+
     const userMessage: Message = {
       id: randomUUID(),
       conversationId: conversation.id,
       role: 'user',
       senderId: 'user',
       senderName: userName?.trim() || 'Você',
-      text: String(text).trim(),
+      text: trimmedText,
+      imageUrl,
+      imageDescription,
       createdAt: now.toISOString(),
     };
     addMessage(userMessage);
@@ -365,7 +383,7 @@ router.post('/conversations/:id/messages', async (req, res) => {
     // Pedido de foto ("manda uma foto de como você tá agora"): o personagem gera
     // e envia uma foto contextual em segundo plano (chega via polling/push), em
     // vez de uma resposta de texto agendada.
-    if (isPhotoRequest(userMessage.text)) {
+    if (!hasImage && isPhotoRequest(userMessage.text)) {
       requestChatPhoto(conversation.id, userMessage.text);
       res.json({ userMessage, replies: [], status: getConversationStatus(conversation.id) });
       return;

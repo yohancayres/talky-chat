@@ -114,13 +114,16 @@ export const api = {
     conversationId: string,
     text: string,
     userName: string,
+    image?: { data: string; mediaType: string },
   ): Promise<SendMessageResponse> {
     return request<SendMessageResponse>(
       `/api/conversations/${conversationId}/messages`,
       {
         method: 'POST',
-        body: JSON.stringify({ text, userName }),
+        body: JSON.stringify({ text, userName, image }),
       },
+      // Enviar foto inclui interpretação por visão no servidor: mais tempo.
+      image ? 60_000 : 30_000,
     );
   },
 

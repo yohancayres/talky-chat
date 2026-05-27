@@ -9,6 +9,7 @@ import {
   buildChatSystemPrompt,
   buildNewsDirective,
   buildProactiveDirective,
+  describeTemperament,
 } from './prompts';
 import { currentPresence, defaultSchedule } from './availability';
 import { MoodShift, rollDailyMood } from './mood';
@@ -213,10 +214,65 @@ function normalizeSchedule(value: unknown): ScheduleBlock[] {
 }
 
 function buildApiMessages(history: Message[]): ApiMessage[] {
-  return history.map((m) => ({
-    role: m.role === 'user' ? 'user' : 'assistant',
-    content: m.text,
-  }));
+  return history.map((m) => {
+    let content = m.text;
+    // Fotos que o usuário enviou entram no contexto como descrição em texto.
+    if (m.imageDescription) {
+      const note = `[Foto que enviei: ${m.imageDescription}]`;
+      content = content ? `${content}\n${note}` : note;
+    }
+    return { role: m.role === 'user' ? 'user' : 'assistant', content };
+  });
+}
+
+type ImageMediaType = 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp';
+
+function normalizeMediaType(mediaType: string): ImageMediaType {
+  if (mediaType.includes('png')) return 'image/png';
+  if (mediaType.includes('gif')) return 'image/gif';
+  if (mediaType.includes('webp')) return 'image/webp';
+  return 'image/jpeg';
+}
+
+/**
+ * Interpreta (visão) uma foto que o usuário enviou e devolve uma descrição curta
+ * em português, para entrar no contexto da conversa. Best-effort.
+ */
+export async function interpretImage(
+  base64: string,
+  mediaType: string,
+  caption?: string,
+): Promise<string> {
+  try {
+    const resp = await anthropic.messages.create(
+      {
+        model: config.model,
+        max_tokens: 300,
+        messages: [
+          {
+            role: 'user',
+            content: [
+              {
+                type: 'image',
+                source: { type: 'base64', media_type: normalizeMediaType(mediaType), data: base64 },
+              },
+              {
+                type: 'text',
+                text: `Descreva em 1-2 frases, em português, o que aparece nesta foto que alguém enviou num chat${
+                  caption ? ` (com a legenda: "${caption}")` : ''
+                }. Seja concreto e objetivo: pessoas, lugar, objetos, clima, o que está acontecendo. Responda só com a descrição.`,
+              },
+            ],
+          },
+        ],
+      },
+      { timeout: 30_000, maxRetries: 1 },
+    );
+    return extractText(resp.content);
+  } catch (err) {
+    console.warn('[talky] não foi possível interpretar a foto enviada:', err);
+    return '';
+  }
 }
 
 const WEB_SEARCH_TOOL = { type: 'web_search_20260209', name: 'web_search' } as const;
@@ -249,7 +305,11 @@ async function runChat(
     ctx.userStatus,
     ctx.intimacy,
   );
-  const messages = buildApiMessages(history);
+  // Janela: só as últimas N mensagens vão ao modelo. Em conversas grandes isso
+  // evita reenviar todo o histórico a cada turno (principal causa de custo).
+  const recent =
+    config.reply.historyLimit > 0 ? history.slice(-config.reply.historyLimit) : history;
+  const messages = buildApiMessages(recent);
 
   if (ctx.directive) {
     messages.push({ role: 'user', content: ctx.directive });
@@ -331,53 +391,68 @@ function clampNum(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
 }
 
-export interface PhotoPlan {
-  /** id de uma foto guardada que já atende ao pedido (reusar, sem gerar). */
-  reuseId?: string;
-  /** Descrição em inglês de uma NOVA foto a gerar (quando não há reuso). */
+export interface PhotoDecision {
+  /** O personagem decidiu mandar a foto agora? */
+  send: boolean;
+  /** Mensagem dele no jeito dele: legenda (se send) ou resposta/recusa (se não). */
+  text: string;
+  /** Se for mandar e não reusar: descrição (inglês) da nova foto. */
   scene?: string;
+  /** Se uma foto guardada serve: o id dela. */
+  reuseId?: string;
 }
 
 /**
- * Planeja a foto: decide se uma das fotos JÁ guardadas (passadas em `candidates`,
- * só as que esta conversa ainda não recebeu) atende ao pedido — caso em que
- * retorna `reuseId` — ou descreve uma NOVA cena para gerar. Mantém-se apropriado
- * (pessoa vestida, sem conteúdo explícito). Em falha, retorna `{ scene: '' }`.
+ * O PERSONAGEM interpreta o pedido de foto e decide, EM PERSONAGEM (conforme
+ * personalidade, humor e intimidade), se manda uma foto agora. Se sim, devolve a
+ * legenda + a cena (ou uma foto guardada pra reusar). Se não, devolve a resposta
+ * em texto, no jeito dele (recusa/enrolação/brincadeira). Best-effort.
  */
-export async function planPhoto(
+export async function decidePhotoResponse(
   character: Character,
+  history: Message[],
   requestText: string,
   candidates: { id: string; description: string }[],
-  opts: { activity?: string; mood?: string } = {},
-): Promise<PhotoPlan> {
+  ctx: { userName?: string; intimacy?: number; mood?: string } = {},
+): Promise<PhotoDecision> {
   try {
+    const recent = history
+      .slice(-8)
+      .map((m) => `${m.role === 'user' ? 'Pessoa' : character.name}: ${m.text}`)
+      .join('\n');
+    const temperament = describeTemperament(character.temperament ?? {});
     const list = candidates.length
       ? candidates.map((c) => `- [id:${c.id}] ${c.description}`).join('\n')
-      : '(nenhuma foto guardada ainda)';
+      : '(nenhuma guardada)';
+    const appearance = character.appearance ? ` Aparência: ${character.appearance}.` : '';
+
+    const system = `Você É ${character.name}, ${character.age} anos, ${character.occupation}.${appearance} Jeito de escrever: ${character.personality.speakingStyle || 'casual e informal'}.${temperament ? `\nTraços marcantes:\n${temperament}` : ''}\nHumor hoje: ${ctx.mood ?? 'normal'}. Intimidade com a pessoa: ${ctx.intimacy ?? 25}/100 (0 = estranhos, 100 = muito íntimos).\nVocê vai decidir, EM PERSONAGEM, se manda uma foto sua agora. Responda SOMENTE com JSON válido, sem markdown.`;
+
+    const user = `Conversa recente:\n${recent || '(começo da conversa)'}\n\nA pessoa pediu/sugeriu uma foto sua: "${requestText}".\n\nReaja como ${character.name} reagiria DE VERDADE. Mandar ou não depende da sua personalidade, do seu humor e de quão íntimos vocês são: pouca intimidade + pedido íntimo/sensual → você provavelmente enrola, brinca, desconversa ou recusa; bastante intimidade + pedido casual → manda numa boa. Não seja robótico nem prestativo demais — seja você.\n\nFotos suas já guardadas (pode reusar uma que sirva, em vez de tirar outra):\n${list}\n\nResponda só com JSON:\n{"send": true|false, "text": "sua mensagem curta no SEU jeito — a LEGENDA da foto se for mandar, ou a sua RESPOSTA (recusa/enrolação/brincadeira) se NÃO for mandar", "reuseId": "id de uma foto guardada que sirva, ou null", "scene": "se for mandar e NÃO reusar: descrição EM INGLÊS da foto (pose, enquadramento, cenário, expressão) coerente com o pedido e com você; pessoa vestida, sem conteúdo explícito; senão deixe \\"\\""}`;
+
     const resp = await anthropic.messages.create(
       {
         model: config.model,
-        max_tokens: 250,
-        system:
-          'You manage a person\'s photo gallery for a chat app. Decide whether an EXISTING photo already satisfies a new request, or a NEW photo must be generated. Reply ONLY with valid JSON, no markdown.',
-        messages: [
-          {
-            role: 'user',
-            content: `New photo request (Portuguese): "${requestText}".\nPerson: ${
-              character.appearance || `${character.age}-year-old ${character.occupation}`
-            }. Right now they are: ${opts.activity || 'at home'}. Mood: ${opts.mood || 'neutral'}.\n\nExisting photos that could be reused (id + description):\n${list}\n\nIf one of the existing photos clearly satisfies the request, reply {"reuseId":"<id>"}.\nOtherwise reply {"reuseId":null,"scene":"<short English description of the NEW photo: pose, framing, setting, expression, matching the request; tasteful, fully clothed, no explicit content>"}.`,
-          },
-        ],
+        max_tokens: 500,
+        system,
+        messages: [{ role: 'user', content: user }],
       },
-      { timeout: 15_000, maxRetries: 1 },
+      { timeout: 20_000, maxRetries: 1 },
     );
     const data = extractJSON(extractText(resp.content));
-    const reuseId = typeof data.reuseId === 'string' ? data.reuseId : undefined;
-    if (reuseId && candidates.some((c) => c.id === reuseId)) return { reuseId };
-    return { scene: typeof data.scene === 'string' ? data.scene : '' };
+    const reuseId =
+      typeof data.reuseId === 'string' && candidates.some((c) => c.id === data.reuseId)
+        ? data.reuseId
+        : undefined;
+    return {
+      send: Boolean(data.send),
+      text: typeof data.text === 'string' ? data.text.trim() : '',
+      scene: typeof data.scene === 'string' ? data.scene : '',
+      reuseId,
+    };
   } catch (err) {
-    console.warn('[talky] não foi possível planejar a foto:', err);
-    return { scene: '' };
+    console.warn('[talky] não foi possível decidir a foto:', err);
+    return { send: false, text: '' };
   }
 }
 

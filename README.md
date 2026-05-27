@@ -56,19 +56,21 @@ Este repositório contém a **primeira entrega**: o loop principal funcionando.
 - **Foto de perfil gerada por IA:** ao criar o personagem, o backend resume as
   características dele e pede uma foto de perfil realista à API de imagens da
   OpenAI (`gpt-image-2`). É opcional — sem `OPENAI_API_KEY`, usa o avatar de emoji.
-- **"Manda uma foto":** o usuário pode pedir uma foto no chat ("manda uma foto",
-  "manda uma foto de como vc tá agora", "tira uma selfie de corpo inteiro"). O
-  backend detecta o pedido, deriva a **cena a partir do pedido** (pose,
-  enquadramento, clima) e gera uma **foto contextual** da persona — refletindo o
-  que ela está fazendo agora e o humor —, enviada com uma legenda curta no jeito
-  dela. Sem geração de imagem disponível, o personagem responde em texto.
-  - **Galeria reaproveitável:** cada personagem guarda as fotos já geradas (com
-    descrição). Como os personagens são globais, se **outra pessoa** faz um
-    pedido parecido, o sistema **reenvia uma foto guardada** (sem gerar de novo,
-    economizando). Já a **mesma pessoa nunca recebe a mesma foto duas vezes** —
-    ganha outra (uma guardada que ainda não viu, ou uma nova). A decisão de
-    reusar × gerar é do modelo (`planPhoto` em `backend/src/ai.ts`); a geração e
-    a galeria ficam em `backend/src/image.ts`/`scheduler.ts`.
+- **"Manda uma foto":** quando o usuário pede uma foto, o **personagem interpreta
+  e decide, EM PERSONAGEM** (conforme personalidade, humor e intimidade), se manda
+  ou não — reservado/pouca intimidade tende a enrolar ou recusar; íntimo/casual
+  manda numa boa. Se decide mandar, gera uma **foto contextual** (roupa, cenário
+  e ângulo variados a cada vez, sem copiar o look do perfil) com legenda no jeito
+  dele; se não, responde em texto. Decisão em `decidePhotoResponse`
+  (`backend/src/ai.ts`); geração em `backend/src/image.ts`.
+  - **Galeria reaproveitável:** cada personagem guarda as fotos geradas; outra
+    pessoa pode receber uma já existente (economiza), mas a **mesma pessoa nunca
+    recebe a mesma foto duas vezes**.
+- **Receber fotos do usuário:** o usuário pode **anexar uma foto** no chat (botão
+  ＋). O backend salva a imagem, **interpreta com visão** (descrição em texto) e
+  insere essa descrição no contexto — então o personagem **reage ao conteúdo da
+  foto** naturalmente. A interpretação é feita uma vez e guardada (`interpretImage`
+  em `backend/src/ai.ts`), sem reenviar a imagem a cada turno.
 - **Múltiplas conversas:** tela de lista (estilo mensageiro) com prévia da última
   mensagem, horário e badge de não lidos. Começa com uma conversa; o botão "+"
   permite conhecer novos contatos. Cada conversa pertence a um usuário (userId),

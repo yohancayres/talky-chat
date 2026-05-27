@@ -102,8 +102,10 @@ export interface Message {
   senderId: string;
   senderName: string;
   text: string;
-  /** Foto enviada na mensagem (ex: "/photos/<id>.png"), quando houver. */
+  /** Foto enviada na mensagem (ex: "/photos/<id>.png" ou "/uploads/<id>.jpg"). */
   imageUrl?: string;
+  /** Descrição (gerada por visão) de uma foto que o USUÁRIO enviou — vai pro contexto. */
+  imageDescription?: string;
   createdAt: string;
 }
 

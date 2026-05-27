@@ -11,7 +11,10 @@ import { Avatar } from './Avatar';
 function ImageAttachment({ url, tint }: { url: string; tint: string }) {
   const [loaded, setLoaded] = useState(false);
   const [failed, setFailed] = useState(false);
-  const uri = `${api.baseUrl}${url}`;
+  // URIs absolutas (foto local recém-escolhida, otimista) usam direto; caminhos
+  // relativos do servidor (/uploads, /photos) ganham o baseUrl.
+  const uri =
+    /^(https?:|file:|data:|blob:|content:)/.test(url) ? url : `${api.baseUrl}${url}`;
 
   if (failed) {
     return (

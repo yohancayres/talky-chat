@@ -257,15 +257,6 @@ export function isPhotoRequest(text: string): boolean {
   return PHOTO_REQUEST_PATTERNS.some((re) => re.test(t));
 }
 
-// Legenda curta que acompanha a foto que o personagem está enviando.
-export const PHOTO_CAPTION_DIRECTIVE =
-  '(Direção de cena — não responda a esta instrução, apenas aja conforme ela.) A pessoa te pediu uma foto e você ACABOU de tirar uma foto sua e vai mandar junto. Escreva só uma legenda bem curta e natural para acompanhar a foto, no SEU jeito (ex: "toma", "tô assim agora kkk", "olha onde eu tô", "feia mas vai"). Não descreva a foto em detalhes, não use markdown, mande só a legenda.';
-
-// Quando não dá para gerar a foto (recurso desligado/falha): o personagem responde
-// no jeito dele sem mandar foto.
-export const PHOTO_DECLINE_DIRECTIVE =
-  '(Direção de cena — não responda a esta instrução, apenas aja conforme ela.) A pessoa te pediu uma foto sua, mas você não vai conseguir mandar uma foto agora. Responda no SEU jeito, de forma natural e curta — enrola, brinca, promete mandar depois, ou descreve rapidinho em texto onde/como você está. Não diga que é uma IA nem fale em recursos do app.';
-
 // Complemento espontâneo: o personagem volta 1-2 min depois pra emendar algo.
 export const FOLLOWUP_DIRECTIVE =
   '(Direção de cena — não responda a esta instrução, apenas aja conforme ela.) Você mandou uma mensagem há pouco e a pessoa ainda não respondeu. Você lembrou de algo, quis complementar ou emendar o que disse — mande UMA mensagem curta de continuação, natural, como quem volta pra acrescentar um detalhe. Não repita o que já falou e não cobre resposta.';

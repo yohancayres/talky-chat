@@ -6,6 +6,12 @@ import { applyMoodShift, ensureDailyMood } from './mood';
 import { getCharacter, getConversation, saveCharacter, saveConversation } from './store';
 import { Character, Conversation, Message } from './types';
 
+// Avalia humor/intimidade a cada N mensagens da conversa (não a cada mensagem),
+// para economizar chamadas ao modelo. Conta o tamanho do histórico desde a
+// última avaliação (estado em memória; reinício re-sincroniza naturalmente).
+const ASSESS_EVERY = Math.max(1, Number(process.env.IMPACT_ASSESS_EVERY ?? 10));
+const lastAssessedCount = new Map<string, number>();
+
 /**
  * Garante que o personagem está com o humor do dia atual (re-sorteia e persiste
  * se virou o dia). Retorna o personagem possivelmente atualizado.
@@ -33,6 +39,11 @@ export async function recordConversationImpact(
   const moodOn = config.mood.enabled && config.mood.conversationEffect;
   const intimacyOn = config.intimacy.enabled;
   if (!moodOn && !intimacyOn) return;
+
+  // Só reavalia a cada ASSESS_EVERY mensagens novas desta conversa.
+  const last = lastAssessedCount.get(conversation.id) ?? 0;
+  if (history.length - last < ASSESS_EVERY) return;
+  lastAssessedCount.set(conversation.id, history.length);
 
   const level = conversation.intimacy ?? DEFAULT_INTIMACY;
   const impact = await assessConversationImpact(character, history, level);

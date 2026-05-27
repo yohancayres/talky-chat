@@ -1,3 +1,4 @@
+import { randomUUID } from 'crypto';
 import fs from 'fs';
 import path from 'path';
 import { config } from './config';
@@ -7,6 +8,22 @@ import { describeTemperament } from './prompts';
 export const AVATARS_DIR = path.join(__dirname, '..', 'data', 'avatars');
 // Fotos enviadas no chat (contextuais) ficam separadas do avatar de perfil.
 export const PHOTOS_DIR = path.join(__dirname, '..', 'data', 'photos');
+// Fotos que o USUÁRIO envia para o personagem.
+export const UPLOADS_DIR = path.join(__dirname, '..', 'data', 'uploads');
+
+/** Salva uma imagem enviada pelo usuário (base64) e devolve o caminho público. */
+export function saveUpload(base64: string, mediaType: string): string | null {
+  try {
+    const ext = mediaType.includes('png') ? 'png' : mediaType.includes('webp') ? 'webp' : 'jpg';
+    const fileName = `${randomUUID()}.${ext}`;
+    fs.mkdirSync(UPLOADS_DIR, { recursive: true });
+    fs.writeFileSync(path.join(UPLOADS_DIR, fileName), Buffer.from(base64, 'base64'));
+    return `/uploads/${fileName}`;
+  } catch (err) {
+    console.warn('[talky] não foi possível salvar a foto enviada:', err);
+    return null;
+  }
+}
 
 // Personagens com foto sendo gerada agora (estado em memória).
 const generatingAvatars = new Set<string>();
@@ -54,6 +71,22 @@ const ANGLES = [
   'casual selfie angle',
   'looking off-camera',
   'straight-on portrait',
+  'arm-length selfie',
+  'mirror selfie',
+];
+
+// Roupas variadas — para a foto do chat NÃO repetir o look da foto de perfil.
+const OUTFITS = [
+  'a casual t-shirt',
+  'a hoodie',
+  'a button-up shirt',
+  'a tank top',
+  'a knit sweater',
+  'workout clothes',
+  'cozy clothes at home',
+  'a jacket over a tee',
+  'a summery outfit',
+  'whatever fits the moment',
 ];
 
 function pick<T>(items: T[]): T {
@@ -111,19 +144,20 @@ function buildChatPhotoPrompt(
   const parts = [
     'A realistic, casual photo that a fictional adult person (not a real or famous individual) just took with their phone and sent in a chat.',
     character.appearance
-      ? `Same person, consistent features: ${character.appearance}.`
+      ? `SAME PERSON — keep the same face, hair, age, ethnicity and body type as: ${character.appearance}. Treat any clothing or style mentioned there as NOT fixed.`
       : `A ${character.age}-year-old person.`,
     `A ${character.age}-year-old ${character.occupation} from ${character.location}, Brazil.`,
     opts.scene
       ? `The photo: ${opts.scene}`
       : opts.activity
         ? `Right now they are: ${opts.activity} — show them in a fitting setting for that.`
-        : 'Show them in a natural everyday setting.',
+        : `A candid everyday moment, ${pick(SCENES)}.`,
     !opts.scene && opts.mood
       ? `Their current mood: ${opts.mood} — let it show subtly in the expression.`
       : '',
-    `Single person, face visible${opts.scene ? '' : `, candid ${pick(ANGLES)}`}.`,
-    'Photorealistic, natural lighting, looks like a genuine spontaneous smartphone photo, not an illustration, not a cartoon, no text overlay.',
+    // Variedade: roupa, enquadramento e luz diferentes a cada foto — nunca o look do perfil.
+    `Make this clearly DIFFERENT from a profile picture and from previous photos: a different outfit (${pick(OUTFITS)}), ${pick(ANGLES)}, different setting and lighting. Do NOT reuse the same clothes.`,
+    'Single person, face visible. Photorealistic, natural lighting, looks like a genuine spontaneous smartphone photo, not an illustration, not a cartoon, no text overlay.',
   ];
   return parts.filter(Boolean).join(' ');
 }

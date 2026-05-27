@@ -59,6 +59,9 @@ export const config = {
     maxAwakeMinutes: Number(process.env.REPLY_MAX_AWAKE_MINUTES ?? 30),
     // Multiplica a duração da "digitação" (proporcional ao tamanho da mensagem).
     typingSpeedFactor: Number(process.env.REPLY_TYPING_SPEED_FACTOR ?? 1),
+    // Quantas mensagens recentes do histórico enviar ao modelo por turno.
+    // Limita o custo em conversas grandes (o persona em si vai no system prompt).
+    historyLimit: Number(process.env.REPLY_HISTORY_LIMIT ?? 30),
   },
   character: {
     // Personagens são GLOBAIS: ao entrar, há esta chance (0-1) de o usuário ser
