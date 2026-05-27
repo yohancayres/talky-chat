@@ -4,16 +4,28 @@ import { Character, ChatStatus, Conversation, ConversationSummary, Message } fro
 // http://SEU_IP_LOCAL:3000 definindo EXPO_PUBLIC_API_URL antes de rodar o app.
 const BASE_URL = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:3000';
 
+// Provedor do token de sessão (Clerk). Definido no App via setAuthTokenGetter
+// assim que o usuário está autenticado; toda requisição manda Authorization.
+let authTokenGetter: (() => Promise<string | null>) | null = null;
+export function setAuthTokenGetter(fn: (() => Promise<string | null>) | null): void {
+  authTokenGetter = fn;
+}
+
 // timeoutMs <= 0 desliga o timeout — usado em operações longas (ex: gerar
 // personagem + foto de perfil, que pode levar mais de um minuto).
 async function request<T>(path: string, init?: RequestInit, timeoutMs = 30_000): Promise<T> {
   const controller = new AbortController();
   const timer = timeoutMs > 0 ? setTimeout(() => controller.abort(), timeoutMs) : null;
   try {
+    const token = authTokenGetter ? await authTokenGetter() : null;
     const res = await fetch(`${BASE_URL}${path}`, {
       ...init,
       signal: controller.signal,
-      headers: { 'Content-Type': 'application/json', ...(init?.headers ?? {}) },
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...(init?.headers ?? {}),
+      },
     });
     if (!res.ok) {
       let detail = `Erro ${res.status}`;
@@ -95,18 +107,19 @@ export const api = {
     });
   },
 
-  // Exclui a conversa (o personagem permanece no Talky; só some o histórico).
+  // Exclui a conversa (o personagem permanece no AmyChat; só some o histórico).
   deleteConversation(conversationId: string): Promise<{ ok: boolean }> {
     return request<{ ok: boolean }>(`/api/conversations/${conversationId}`, {
       method: 'DELETE',
     });
   },
 
-  // Associa uma conversa antiga (chat único) ao usuário atual.
-  claimConversation(conversationId: string, userId: string): Promise<{ ok: boolean }> {
-    return request<{ ok: boolean }>(`/api/conversations/${conversationId}/claim`, {
+  // Migra para a conta autenticada (token) as conversas anônimas deste device.
+  // O dono novo vem do token no backend; aqui só passamos as referências antigas.
+  claimAnonymous(deviceId?: string, legacyConversationId?: string): Promise<{ claimed: number }> {
+    return request<{ claimed: number }>(`/api/claim-anonymous`, {
       method: 'POST',
-      body: JSON.stringify({ userId }),
+      body: JSON.stringify({ deviceId, legacyConversationId }),
     });
   },
 

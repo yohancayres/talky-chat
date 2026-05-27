@@ -108,11 +108,11 @@ export function OnboardingScreen({
     >
       <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
         <Text style={styles.logoEmoji}>💬</Text>
-        <Text style={styles.title}>{isNewContact ? 'Novo contato' : 'Talky'}</Text>
+        <Text style={styles.title}>{isNewContact ? 'Novo contato' : 'AmyChat'}</Text>
         <Text style={styles.tagline}>
           {isNewContact
-            ? 'Conheça mais alguém no Talky — um novo personagem ou alguém que já existe por aqui.'
-            : 'Um amigo de IA com história, rotina e vida própria. Você pode criar um novo personagem ou esbarrar com alguém que já existe no Talky.'}
+            ? 'Conheça mais alguém no AmyChat — um novo personagem ou alguém que já existe por aqui.'
+            : 'Um amigo de IA com história, rotina e vida própria. Você pode criar um novo personagem ou esbarrar com alguém que já existe no AmyChat.'}
         </Text>
 
         {!isNewContact && (
@@ -140,7 +140,7 @@ export function OnboardingScreen({
             multiline
           />
           <Text style={styles.help}>
-            Deixe em branco para conhecer alguém (novo ou já existente no Talky).
+            Deixe em branco para conhecer alguém (novo ou já existente no AmyChat).
           </Text>
         </View>
 

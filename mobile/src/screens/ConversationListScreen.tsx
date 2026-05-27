@@ -83,7 +83,7 @@ export function ConversationListScreen({
       haptics.selection();
       Alert.alert(
         'Excluir conversa',
-        `Apagar sua conversa com ${name}? O histórico será removido. ${name} continua no Talky e você pode reencontrá-lo(a) depois.`,
+        `Apagar sua conversa com ${name}? O histórico será removido. ${name} continua no AmyChat e você pode reencontrá-lo(a) depois.`,
         [
           { text: 'Cancelar', style: 'cancel' },
           {
@@ -192,7 +192,7 @@ export function ConversationListScreen({
             <View style={styles.empty}>
               <Text style={styles.emptyEmoji}>💬</Text>
               <Text style={styles.emptyTitle}>Nenhuma conversa ainda</Text>
-              <Text style={styles.emptyText}>Toque em + para conhecer alguém no Talky.</Text>
+              <Text style={styles.emptyText}>Toque em + para conhecer alguém no AmyChat.</Text>
               <Pressable style={styles.emptyButton} onPress={handleNewContact}>
                 <Text style={styles.emptyButtonText}>Conhecer alguém</Text>
               </Pressable>

@@ -1,7 +1,8 @@
 {
   "expo": {
-    "name": "Talky",
+    "name": "AmyChat",
     "slug": "talky",
+    "scheme": "amychat",
     "version": "0.1.0",
     "orientation": "portrait",
     "userInterfaceStyle": "light",
@@ -18,24 +19,36 @@
       [
         "expo-image-picker",
         {
-          "photosPermission": "O Talky precisa da sua galeria para você anexar fotos no chat."
+          "photosPermission": "O AmyChat precisa da sua galeria para você anexar fotos no chat."
         }
       ],
       [
         "expo-audio",
         {
-          "microphonePermission": "O Talky precisa do microfone para você gravar áudios no chat."
+          "microphonePermission": "O AmyChat precisa do microfone para você gravar áudios no chat."
         }
-      ]
+      ],
+      "expo-secure-store",
+      "expo-web-browser"
     ],
     "ios": {
       "supportsTablet": true
     },
     "android": {
-      "edgeToEdgeEnabled": true
+      "edgeToEdgeEnabled": true,
+      "package": "com.yohancayres.amychat",
+      "permissions": [
+        "android.permission.RECORD_AUDIO",
+        "android.permission.MODIFY_AUDIO_SETTINGS"
+      ]
     },
     "web": {
       "bundler": "metro"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "c676b57b-8df6-4197-a277-2e7adeaf4517"
+      }
     }
   }
 }

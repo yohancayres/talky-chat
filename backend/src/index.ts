@@ -1,3 +1,4 @@
+import { clerkMiddleware, getAuth } from '@clerk/express';
 import cors from 'cors';
 import express from 'express';
 import { config } from './config';
@@ -30,7 +31,25 @@ app.get('/health', (_req, res) => {
   });
 });
 
-app.use('/api', router);
+// Autenticação: com CLERK_SECRET_KEY definido, todo /api exige um token válido
+// (Authorization: Bearer). Sem a chave, segue aberto (modo dev/legado) com aviso.
+if (config.auth.enabled) {
+  app.use(clerkMiddleware());
+  // Guard próprio (em vez do requireAuth, que faz redirect): responde 401 JSON,
+  // que é o que o cliente mobile espera.
+  app.use('/api', (req, res, next) => {
+    if (!getAuth(req).userId) {
+      res.status(401).json({ error: 'Não autenticado.' });
+      return;
+    }
+    next();
+  }, router);
+} else {
+  console.warn(
+    '[talky] AUTENTICAÇÃO DESLIGADA — defina CLERK_SECRET_KEY para exigir login no /api.',
+  );
+  app.use('/api', router);
+}
 
 async function main(): Promise<void> {
   // Conecta ao banco e carrega o estado ANTES de aceitar requisições.

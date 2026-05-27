@@ -1,5 +1,7 @@
+import { getAuth } from '@clerk/express';
 import { randomUUID } from 'crypto';
 import { Router } from 'express';
+import type { Request } from 'express';
 import { generateAppearance, generateCharacter, generateReply, interpretImage } from './ai';
 import { transcribeAudio } from './audio';
 import { computeReplyDueAt } from './availability';
@@ -44,6 +46,22 @@ import { Character, Conversation, Message } from './types';
 
 export const router = Router();
 
+// Id do usuário autenticado (Clerk). Com auth ligada, vem SEMPRE do token —
+// nunca confiamos em userId vindo do corpo/URL. Com auth desligada (dev), cai
+// no `fallback` (body/param) para manter o comportamento legado.
+function authUserId(req: Request, fallback?: string): string | undefined {
+  if (config.auth.enabled) return getAuth(req).userId ?? undefined;
+  return fallback;
+}
+
+// O usuário pode acessar a conversa? Dono confere; conversas SEM dono (legado,
+// antes da migração) ficam acessíveis para poderem ser reivindicadas no login.
+function canAccess(conversation: Conversation, req: Request): boolean {
+  if (!config.auth.enabled) return true;
+  const uid = getAuth(req).userId;
+  return !conversation.userId || conversation.userId === uid;
+}
+
 function characterMessage(
   conversationId: string,
   character: Character,
@@ -64,16 +82,18 @@ function characterMessage(
 // conversa e gera a mensagem de boas-vindas.
 router.post('/characters/generate', async (req, res) => {
   try {
-    const { hint, userName, userId } = req.body ?? {};
+    const { hint, userName } = req.body ?? {};
+    const userId = authUserId(
+      req,
+      typeof req.body?.userId === 'string' ? req.body.userId : undefined,
+    );
 
     // Personagens são globais e compartilhados. Com certa probabilidade, o
     // usuário "esbarra" em um personagem que já existe no Talky — MAS nunca em
     // alguém com quem ele já conversa (evita conversa duplicada).
     const allChars = listCharacters();
     const userCharIds = new Set(
-      (typeof userId === 'string' ? listConversationsByUser(userId) : []).flatMap(
-        (c) => c.characterIds,
-      ),
+      (userId ? listConversationsByUser(userId) : []).flatMap((c) => c.characterIds),
     );
     const pool = allChars.filter((c) => !userCharIds.has(c.id));
 
@@ -103,7 +123,7 @@ router.post('/characters/generate', async (req, res) => {
       title: character.name,
       characterIds: [character.id],
       userName: typeof userName === 'string' ? userName.trim() : undefined,
-      userId: typeof userId === 'string' ? userId : undefined,
+      userId,
       intimacy: DEFAULT_INTIMACY, // começam se conhecendo
       lastReadAt: new Date().toISOString(),
       createdAt: new Date().toISOString(),
@@ -140,6 +160,10 @@ router.get('/conversations/:id', (req, res) => {
     res.status(404).json({ error: 'Conversa não encontrada.' });
     return;
   }
+  if (!canAccess(conversation, req)) {
+    res.status(403).json({ error: 'Sem acesso a esta conversa.' });
+    return;
+  }
   const characters = conversation.characterIds
     .map(getCharacter)
     .filter((c): c is Character => Boolean(c));
@@ -155,6 +179,10 @@ router.delete('/conversations/:id', (req, res) => {
     res.status(404).json({ error: 'Conversa não encontrada.' });
     return;
   }
+  if (!canAccess(conversation, req)) {
+    res.status(403).json({ error: 'Sem acesso a esta conversa.' });
+    return;
+  }
   // Não apaga os arquivos de foto: com o reuso de galeria, a mesma foto pode
   // estar guardada no personagem e no histórico de outras conversas.
   deleteConversation(conversation.id);
@@ -163,7 +191,8 @@ router.delete('/conversations/:id', (req, res) => {
 
 // Lista as conversas de um usuário (tela de conversas), com prévia e não lidos.
 router.get('/users/:userId/conversations', (req, res) => {
-  const items = listConversationsByUser(req.params.userId)
+  const userId = authUserId(req, req.params.userId) ?? req.params.userId;
+  const items = listConversationsByUser(userId)
     .map((conv) => {
       const character = getCharacter(conv.characterIds[0]);
       const messages = getMessages(conv.id);
@@ -201,26 +230,46 @@ router.post('/conversations/:id/read', (req, res) => {
     res.status(404).json({ error: 'Conversa não encontrada.' });
     return;
   }
+  if (!canAccess(conversation, req)) {
+    res.status(403).json({ error: 'Sem acesso a esta conversa.' });
+    return;
+  }
   saveConversation({ ...conversation, lastReadAt: new Date().toISOString() });
   res.json({ ok: true });
 });
 
-// Associa uma conversa sem dono a um usuário (migração do chat único antigo).
-router.post('/conversations/:id/claim', (req, res) => {
-  const conversation = getConversation(req.params.id);
-  if (!conversation) {
-    res.status(404).json({ error: 'Conversa não encontrada.' });
+// Migração: reivindica para a conta autenticada (token) as conversas anônimas
+// criadas antes do login — as do device antigo (deviceId) e o chat único legado.
+router.post('/claim-anonymous', (req, res) => {
+  const newOwner = authUserId(req);
+  if (config.auth.enabled && !newOwner) {
+    res.status(401).json({ error: 'Não autenticado.' });
     return;
   }
-  const { userId } = req.body ?? {};
-  if (typeof userId !== 'string' || !userId) {
-    res.status(400).json({ error: 'userId ausente.' });
+  if (!newOwner) {
+    // Sem auth não há identidade estável para migrar.
+    res.json({ claimed: 0 });
     return;
   }
-  if (!conversation.userId) {
-    saveConversation({ ...conversation, userId });
+
+  const { deviceId, legacyConversationId } = req.body ?? {};
+  let claimed = 0;
+
+  if (typeof deviceId === 'string' && deviceId && deviceId !== newOwner) {
+    for (const conv of listConversationsByUser(deviceId)) {
+      saveConversation({ ...conv, userId: newOwner });
+      claimed += 1;
+    }
   }
-  res.json({ ok: true });
+  if (typeof legacyConversationId === 'string' && legacyConversationId) {
+    const conv = getConversation(legacyConversationId);
+    if (conv && !conv.userId) {
+      saveConversation({ ...conv, userId: newOwner });
+      claimed += 1;
+    }
+  }
+
+  res.json({ claimed });
 });
 
 // Gera (ou troca) a foto de perfil do personagem. Sem foto => cria do zero;
@@ -281,6 +330,10 @@ router.post('/conversations/:id/user-status', (req, res) => {
     res.status(404).json({ error: 'Conversa não encontrada.' });
     return;
   }
+  if (!canAccess(conversation, req)) {
+    res.status(403).json({ error: 'Sem acesso a esta conversa.' });
+    return;
+  }
   const { status } = req.body ?? {};
   const value = typeof status === 'string' ? status.trim() : '';
   saveConversation({ ...conversation, userStatus: value || undefined });
@@ -293,6 +346,10 @@ router.get('/conversations/:id/messages', (req, res) => {
   const conversation = getConversation(req.params.id);
   if (!conversation) {
     res.status(404).json({ error: 'Conversa não encontrada.' });
+    return;
+  }
+  if (!canAccess(conversation, req)) {
+    res.status(403).json({ error: 'Sem acesso a esta conversa.' });
     return;
   }
   const after = typeof req.query.after === 'string' ? req.query.after : undefined;
@@ -310,6 +367,10 @@ router.post('/conversations/:id/push-token', (req, res) => {
     res.status(404).json({ error: 'Conversa não encontrada.' });
     return;
   }
+  if (!canAccess(conversation, req)) {
+    res.status(403).json({ error: 'Sem acesso a esta conversa.' });
+    return;
+  }
   const { token } = req.body ?? {};
   if (!token || typeof token !== 'string') {
     res.status(400).json({ error: 'Token ausente.' });
@@ -325,6 +386,11 @@ router.post('/conversations/:id/messages', async (req, res) => {
     const conversation = getConversation(req.params.id);
     if (!conversation) {
       res.status(404).json({ error: 'Conversa não encontrada.' });
+      return;
+    }
+
+    if (!canAccess(conversation, req)) {
+      res.status(403).json({ error: 'Sem acesso a esta conversa.' });
       return;
     }
 

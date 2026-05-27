@@ -6,6 +6,7 @@ import {
   Dimensions,
   FlatList,
   Image,
+  Keyboard,
   KeyboardAvoidingView,
   NativeScrollEvent,
   NativeSyntheticEvent,
@@ -28,6 +29,7 @@ import {
 } from 'expo-audio';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as ImagePicker from 'expo-image-picker';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { api } from '../api';
 import { Avatar } from '../components/Avatar';
 import { CharacterProfileModal } from '../components/CharacterProfileModal';
@@ -134,6 +136,19 @@ export function ChatScreen({
   onBack: () => void;
   onReset: () => void;
 }) {
+  const insets = useSafeAreaInsets();
+  // Com o teclado aberto, não reservamos o espaço da barra de navegação no
+  // rodapé (ela fica atrás do teclado) — evita um vão feio acima do teclado.
+  const [keyboardUp, setKeyboardUp] = useState(false);
+  useEffect(() => {
+    const show = Keyboard.addListener('keyboardDidShow', () => setKeyboardUp(true));
+    const hide = Keyboard.addListener('keyboardDidHide', () => setKeyboardUp(false));
+    return () => {
+      show.remove();
+      hide.remove();
+    };
+  }, []);
+  const inputPadBottom = keyboardUp ? 12 : Math.max(insets.bottom, 12);
   const [character, setCharacter] = useState<Character>(initialCharacter);
   const [regeneratingPhoto, setRegeneratingPhoto] = useState(false);
   const [messages, setMessages] = useState<Message[]>(initialMessages);
@@ -247,11 +262,21 @@ export function ChatScreen({
         return;
       }
       await setAudioModeAsync({ playsInSilentMode: true, allowsRecording: true });
-      await audioRecorder.prepareToRecordAsync();
+      // Logo após conceder a permissão pela 1ª vez, o Android às vezes ainda não
+      // liberou o microfone e o prepare falha. Tentamos de novo após uma pausa.
+      try {
+        await audioRecorder.prepareToRecordAsync();
+      } catch {
+        await new Promise((r) => setTimeout(r, 400));
+        await audioRecorder.prepareToRecordAsync();
+      }
       audioRecorder.record();
       haptics.medium();
     } catch (e) {
-      Alert.alert('Áudio', e instanceof Error ? e.message : 'Não foi possível gravar.');
+      console.error('[talky] erro ao iniciar gravação:', e);
+      const msg =
+        e instanceof Error ? e.message : typeof e === 'string' ? e : JSON.stringify(e);
+      Alert.alert('Áudio', `Não foi possível gravar: ${msg}`);
     }
   }
 
@@ -521,9 +546,11 @@ export function ChatScreen({
     >
     <KeyboardAvoidingView
       style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      // Com edge-to-edge no Android a janela não redimensiona sozinha, então o
+      // teclado cobria o input. "padding" nos dois empurra o input acima dele.
+      behavior="padding"
     >
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: insets.top + 10 }]}>
         <Pressable onPress={onBack} hitSlop={12} style={styles.backButton}>
           <Text style={styles.backIcon}>‹</Text>
         </Pressable>
@@ -629,7 +656,7 @@ export function ChatScreen({
       </View>
 
       {recorderState.isRecording ? (
-        <View style={styles.inputBar}>
+        <View style={[styles.inputBar, { paddingBottom: inputPadBottom }]}>
           <Pressable onPress={cancelRecording} hitSlop={10} style={styles.recCancel}>
             <Text style={styles.recCancelIcon}>✕</Text>
           </Pressable>
@@ -658,7 +685,7 @@ export function ChatScreen({
             </View>
           )}
 
-          <View style={styles.inputBar}>
+          <View style={[styles.inputBar, { paddingBottom: inputPadBottom }]}>
             <Pressable
               style={styles.attachButton}
               onPress={pickImage}
@@ -736,8 +763,22 @@ const styles = StyleSheet.create({
     borderBottomColor: colors.border,
     ...shadow.sm,
   },
-  backButton: { paddingHorizontal: 4, paddingRight: 6 },
-  backIcon: { fontSize: 34, color: colors.accent, lineHeight: 36, marginTop: -4 },
+  backButton: {
+    paddingHorizontal: 4,
+    paddingRight: 6,
+    height: 40,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  // includeFontPadding:false + textAlignVertical evitam o glifo ser cortado no
+  // Android (onde o chevron sumia por causa do padding extra de fonte).
+  backIcon: {
+    fontSize: 34,
+    color: colors.accent,
+    lineHeight: 38,
+    includeFontPadding: false,
+    textAlignVertical: 'center',
+  },
   headerMain: { flex: 1, flexDirection: 'row', alignItems: 'center' },
   headerAvatar: { marginRight: 12 },
   presenceDot: {

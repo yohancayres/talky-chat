@@ -1,15 +1,21 @@
+import { ClerkProvider, useAuth } from '@clerk/clerk-expo';
+import { tokenCache } from '@clerk/clerk-expo/token-cache';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { StatusBar } from 'expo-status-bar';
 import React, { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
-import { api, GenerateResponse } from './src/api';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { api, GenerateResponse, setAuthTokenGetter } from './src/api';
 import { registerForPushToken } from './src/push';
+import { AuthScreen } from './src/screens/AuthScreen';
 import { ChatScreen } from './src/screens/ChatScreen';
 import { ConversationListScreen } from './src/screens/ConversationListScreen';
 import { OnboardingScreen } from './src/screens/OnboardingScreen';
 import { colors } from './src/theme';
 import { Character, ChatStatus, Message } from './src/types';
 import { uuid } from './src/uuid';
+
+const CLERK_PUBLISHABLE_KEY = process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY ?? '';
 
 // Registra o token de push no backend (best-effort, não bloqueia a UI).
 async function syncPushToken(conversationId: string) {
@@ -21,17 +27,15 @@ async function syncPushToken(conversationId: string) {
   }
 }
 
-const STORAGE_USERID = 'talky.userId';
+// Id anônimo antigo do dispositivo: hoje só serve para migrar (reivindicar) as
+// conversas criadas antes do login para a conta autenticada do Clerk.
+const STORAGE_DEVICEID = 'talky.userId';
 const STORAGE_USERNAME = 'talky.userName';
 const STORAGE_CONVERSATION = 'talky.conversationId'; // legado (chat único)
+const STORAGE_MIGRATED = 'talky.migratedTo'; // guarda o userId p/ migrar só uma vez
 
-async function getOrCreateUserId(): Promise<string> {
-  let id = await AsyncStorage.getItem(STORAGE_USERID);
-  if (!id) {
-    id = uuid();
-    await AsyncStorage.setItem(STORAGE_USERID, id);
-  }
-  return id;
+async function getDeviceId(): Promise<string | null> {
+  return AsyncStorage.getItem(STORAGE_DEVICEID);
 }
 
 type Screen =
@@ -49,31 +53,32 @@ type Screen =
       userStatus?: string;
     };
 
-export default function App() {
+function AuthedApp({ userId, onSignOut }: { userId: string; onSignOut: () => void }) {
   const [screen, setScreen] = useState<Screen>({ kind: 'booting' });
-  const [userId, setUserId] = useState<string>('');
   const [userName, setUserName] = useState<string>('');
 
   const boot = useCallback(async () => {
     setScreen({ kind: 'booting' });
     try {
-      const uid = await getOrCreateUserId();
-      setUserId(uid);
       const name = (await AsyncStorage.getItem(STORAGE_USERNAME)) ?? '';
       setUserName(name);
 
-      // Migração: associa o chat único antigo a este usuário.
-      const legacyConv = await AsyncStorage.getItem(STORAGE_CONVERSATION);
-      if (legacyConv) {
+      // Migração única: reivindica para esta conta as conversas criadas antes do
+      // login (chat anônimo do device + chat único legado). Roda só uma vez/conta.
+      const migrated = await AsyncStorage.getItem(STORAGE_MIGRATED);
+      if (migrated !== userId) {
+        const deviceId = await getDeviceId();
+        const legacyConv = await AsyncStorage.getItem(STORAGE_CONVERSATION);
         try {
-          await api.claimConversation(legacyConv, uid);
+          await api.claimAnonymous(deviceId ?? undefined, legacyConv ?? undefined);
         } catch {
-          // ignora; segue para a listagem
+          // best-effort: se falhar, não trava o login
         }
+        await AsyncStorage.setItem(STORAGE_MIGRATED, userId);
         await AsyncStorage.removeItem(STORAGE_CONVERSATION);
       }
 
-      const res = await api.getConversations(uid);
+      const res = await api.getConversations(userId);
       setScreen({ kind: res.conversations.length === 0 ? 'onboarding' : 'list' });
     } catch (e) {
       setScreen({
@@ -81,7 +86,7 @@ export default function App() {
         message: e instanceof Error ? e.message : 'Não foi possível conectar ao servidor.',
       });
     }
-  }, []);
+  }, [userId]);
 
   useEffect(() => {
     boot();
@@ -130,9 +135,10 @@ export default function App() {
   }, []);
 
   const handleReset = useCallback(async () => {
-    await AsyncStorage.multiRemove([STORAGE_USERID, STORAGE_USERNAME, STORAGE_CONVERSATION]);
-    boot();
-  }, [boot]);
+    await AsyncStorage.multiRemove([STORAGE_USERNAME, STORAGE_CONVERSATION, STORAGE_MIGRATED]);
+    setUserName('');
+    onSignOut();
+  }, [onSignOut]);
 
   return (
     <View style={styles.root}>
@@ -167,7 +173,7 @@ export default function App() {
       )}
 
       {screen.kind === 'chat' && (
-        <View style={StyleSheet.absoluteFill}>
+        <View style={[StyleSheet.absoluteFill, styles.chatOverlay]}>
           <ChatScreen
             conversationId={screen.conversationId}
             character={screen.character}
@@ -183,7 +189,7 @@ export default function App() {
 
       {screen.kind === 'error' && (
         <View style={styles.center}>
-          <Text style={styles.errorTitle}>Sem conexão com o Talky</Text>
+          <Text style={styles.errorTitle}>Sem conexão com o AmyChat</Text>
           <Text style={styles.errorText}>{screen.message}</Text>
           <Text style={styles.errorHint}>
             Confira se o backend está rodando e se EXPO_PUBLIC_API_URL aponta para ele.
@@ -192,7 +198,7 @@ export default function App() {
             <Text style={styles.retryText}>Tentar novamente</Text>
           </Pressable>
           <Pressable onPress={handleReset}>
-            <Text style={styles.resetLink}>Começar do zero</Text>
+            <Text style={styles.resetLink}>Sair da conta</Text>
           </Pressable>
         </View>
       )}
@@ -200,8 +206,54 @@ export default function App() {
   );
 }
 
+// Decide entre tela de login e app autenticado, e conecta o token de sessão do
+// Clerk ao cliente HTTP (toda requisição passa a mandar Authorization: Bearer).
+function Root() {
+  const { isLoaded, isSignedIn, userId, getToken, signOut } = useAuth();
+
+  useEffect(() => {
+    setAuthTokenGetter(isSignedIn ? () => getToken() : null);
+    return () => setAuthTokenGetter(null);
+  }, [isSignedIn, getToken]);
+
+  if (!isLoaded) {
+    return (
+      <View style={styles.center}>
+        <ActivityIndicator size="large" color={colors.accent} />
+      </View>
+    );
+  }
+  if (!isSignedIn || !userId) return <AuthScreen />;
+  return <AuthedApp userId={userId} onSignOut={() => signOut()} />;
+}
+
+export default function App() {
+  if (!CLERK_PUBLISHABLE_KEY) {
+    return (
+      <View style={styles.center}>
+        <Text style={styles.errorTitle}>Configuração ausente</Text>
+        <Text style={styles.errorText}>
+          Defina EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY (.env / eas.json) e reinicie com `expo start -c`.
+        </Text>
+      </View>
+    );
+  }
+  return (
+    <ClerkProvider publishableKey={CLERK_PUBLISHABLE_KEY} tokenCache={tokenCache}>
+      <SafeAreaProvider>
+        <StatusBar style="dark" />
+        <Root />
+      </SafeAreaProvider>
+    </ClerkProvider>
+  );
+}
+
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
+  // O chat fica por cima da lista (que segue montada atrás). No Android, o header
+  // da lista tem elevation e "furava" por cima — elevation/zIndex altos + fundo
+  // opaco garantem que o chat cubra a lista.
+  chatOverlay: { backgroundColor: colors.bg, elevation: 12, zIndex: 10 },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32 },
   errorTitle: { fontSize: 20, fontWeight: '700', color: colors.text, marginBottom: 10 },
   errorText: { fontSize: 15, color: colors.danger, textAlign: 'center', marginBottom: 12 },
