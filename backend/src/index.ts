@@ -9,8 +9,10 @@ import { initStore } from './store';
 const app = express();
 
 app.use(cors());
-// Limite alto: fotos enviadas pelo usuário chegam em base64 no corpo.
-app.use(express.json({ limit: '20mb' }));
+// Limite alto: fotos e áudios enviados pelo usuário chegam em base64 no corpo
+// (base64 infla ~33%). 50 MB cobre fotos + áudios longos (2 min de voz ≈ 3 MB).
+// Ajustável por env (ex.: BODY_LIMIT=80mb) sem precisar mexer no código.
+app.use(express.json({ limit: process.env.BODY_LIMIT ?? '50mb' }));
 
 // Fotos de perfil, fotos do personagem e fotos enviadas pelo usuário.
 app.use('/avatars', express.static(AVATARS_DIR));
