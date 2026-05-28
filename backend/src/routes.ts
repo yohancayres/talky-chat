@@ -23,7 +23,7 @@ import {
 import { ensureCharacterVoice, recordConversationImpact, refreshDailyMood } from './moodService';
 import { DEFAULT_INTIMACY } from './intimacy';
 import { DEFAULT_SPLIT_STYLE, splitMessages } from './messaging';
-import { INTRO_DIRECTIVE, isAudioRequest, isPhotoRequest } from './prompts';
+import { AUDIO_REPLY_DIRECTIVE, INTRO_DIRECTIVE, isAudioRequest, isPhotoRequest } from './prompts';
 import { generateSpeech } from './speech';
 import {
   bumpSequence,
@@ -498,6 +498,93 @@ router.post('/conversations/:id/messages', async (req, res) => {
 
     // Pedido por texto OU por voz (transcrição do áudio enviado).
     const commandText = userMessage.text || audioTranscript || '';
+
+    // --- Comandos de TESTE (digite no chat). Desligue com TALKY_TEST_COMMANDS=false.
+    const cmdRaw = commandText.trim();
+    if (config.testCommands && cmdRaw.startsWith('/')) {
+      const ack = (txt: string) => {
+        const m = characterMessage(conversation.id, character, txt);
+        addMessage(m);
+        res.json({ userMessage, replies: [m], status: getConversationStatus(conversation.id) });
+      };
+      const cmd = cmdRaw.toLowerCase();
+      const rest = cmdRaw.replace(/^\/\S+\s*/, '');
+
+      // /intimidade [n | +n | -n]  (sem argumento: +20)
+      const mIntim = cmd.match(/^\/(?:intimidade|intimacy)\b\s*([+-]?\d{1,3})?/);
+      if (mIntim) {
+        const cur = conversation.intimacy ?? DEFAULT_INTIMACY;
+        const arg = mIntim[1];
+        let next = !arg ? cur + 20 : /^[+-]/.test(arg) ? cur + Number(arg) : Number(arg);
+        next = Math.max(0, Math.min(100, Math.round(next)));
+        saveConversation({ ...conversation, intimacy: next });
+        ack(`🔧 [teste] intimidade: ${cur} → ${next}`);
+        return;
+      }
+
+      // /rapido | /lento : muda o fator de velocidade das respostas (global).
+      if (/^\/r[aá]pido\b/.test(cmd) || /^\/fast\b/.test(cmd)) {
+        config.reply.speedFactor = 0.05;
+        ack('🔧 [teste] respostas RÁPIDAS ativadas (fator 0.05). Use /normal para voltar.');
+        return;
+      }
+      if (/^\/(normal|lento|slow)\b/.test(cmd)) {
+        config.reply.speedFactor = Number(process.env.REPLY_SPEED_FACTOR ?? 1);
+        ack(`🔧 [teste] velocidade normal (fator ${config.reply.speedFactor}).`);
+        return;
+      }
+
+      // /foto [descrição opcional] : força o personagem a tirar/mandar uma foto.
+      if (/^\/(foto|photo|selfie)\b/.test(cmd)) {
+        requestChatPhoto(conversation.id, rest || 'manda uma foto de como você tá agora');
+        res.json({ userMessage, replies: [], status: getConversationStatus(conversation.id) });
+        return;
+      }
+
+      // /audio [texto opcional] : força uma nota de voz (TTS).
+      if (/^\/(audio|[aá]udio|voz)\b/.test(cmd)) {
+        const voiced = await ensureCharacterVoice(character);
+        const spoken =
+          rest ||
+          (await generateReply(voiced, getMessages(conversation.id), {
+            userName,
+            intimacy: conversation.intimacy,
+            userMemory: conversation.userMemory,
+            directive: AUDIO_REPLY_DIRECTIVE,
+          }));
+        const audioUrl =
+          (await generateSpeech(voiced, spoken, { mood: voiced.mood?.label })) ?? undefined;
+        if (audioUrl) {
+          const voiceMsg: Message = {
+            id: randomUUID(),
+            conversationId: conversation.id,
+            role: 'character',
+            senderId: character.id,
+            senderName: character.name,
+            text: spoken,
+            audioUrl,
+            createdAt: new Date().toISOString(),
+          };
+          addMessage(voiceMsg);
+          res.json({ userMessage, replies: [voiceMsg], status: getConversationStatus(conversation.id) });
+          return;
+        }
+        ack('🔧 [teste] TTS indisponível (verifique a chave da ElevenLabs/OpenAI).');
+        return;
+      }
+
+      // /comandos | /ajuda : lista os comandos de teste.
+      if (/^\/(comandos|ajuda|help|test)\b/.test(cmd)) {
+        ack(
+          '🔧 Comandos de teste:\n' +
+            '/intimidade [n|+n|-n] — define/ajusta a intimidade (0-100)\n' +
+            '/foto [descrição] — força uma foto\n' +
+            '/audio [texto] — força uma nota de voz\n' +
+            '/rapido — respostas quase instantâneas (/normal volta)',
+        );
+        return;
+      }
+    }
 
     // Pedido de foto ("manda uma foto de como você tá agora"): o personagem gera
     // e envia uma foto contextual em segundo plano (chega via polling/push).

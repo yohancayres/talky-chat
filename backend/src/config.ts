@@ -14,6 +14,9 @@ export const config = {
   // (apenas para desenvolvimento local). Em produção, defina MONGODB_URI.
   mongoUri: process.env.MONGODB_URI ?? '',
   mongoDbName: process.env.MONGODB_DB ?? 'talky',
+  // Comandos de teste no chat (/intimidade, /foto, /audio). Desligue em produção
+  // com TALKY_TEST_COMMANDS=false. Só afetam a conversa do próprio usuário.
+  testCommands: (process.env.TALKY_TEST_COMMANDS ?? 'true') !== 'false',
   // Autenticação (Clerk). O @clerk/express precisa de AMBAS as chaves no ambiente
   // (CLERK_SECRET_KEY e CLERK_PUBLISHABLE_KEY). Só liga quando as duas existem —
   // assim, faltando uma, cai no modo aberto com aviso em vez de crashar a cada req.
