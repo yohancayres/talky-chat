@@ -14,10 +14,11 @@ export const config = {
   // (apenas para desenvolvimento local). Em produção, defina MONGODB_URI.
   mongoUri: process.env.MONGODB_URI ?? '',
   mongoDbName: process.env.MONGODB_DB ?? 'talky',
-  // Autenticação (Clerk). Habilita exigir login quando CLERK_SECRET_KEY existe.
-  // O @clerk/express lê CLERK_SECRET_KEY/CLERK_PUBLISHABLE_KEY do ambiente.
+  // Autenticação (Clerk). O @clerk/express precisa de AMBAS as chaves no ambiente
+  // (CLERK_SECRET_KEY e CLERK_PUBLISHABLE_KEY). Só liga quando as duas existem —
+  // assim, faltando uma, cai no modo aberto com aviso em vez de crashar a cada req.
   auth: {
-    enabled: Boolean(process.env.CLERK_SECRET_KEY),
+    enabled: Boolean(process.env.CLERK_SECRET_KEY && process.env.CLERK_PUBLISHABLE_KEY),
   },
   // Imagens e transcrição de áudio usam a OpenAI.
   openaiApiKey: process.env.OPENAI_API_KEY ?? '',

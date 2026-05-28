@@ -172,6 +172,34 @@ function userStatusSection(name: string, userStatus?: string): string {
   return `\n# Status de ${name} agora\n${name} marcou que está: ${userStatus.trim()}. Leve isso em conta — você pode perguntar ou comentar sobre isso de forma natural (ex: como está o trabalho, se está ocupado), e não estranhar se demorar a responder. Não force.\n`;
 }
 
+/**
+ * Quão curto o personagem escreve. As mensagens são SEMPRE curtas — esse é o teto;
+ * a variação só deixa IGUAL ou MAIS CURTO, nunca mais longo. Personalidade
+ * (introvertido/formal = mais seco) e horário (madrugada/manhã = mais lacônico)
+ * empurram para mais curto. Retorna a orientação que entra no prompt.
+ */
+function messageLengthHint(temperament: Record<string, number>, hour: number): string {
+  const v = (k: string) => temperament[k] ?? 5; // escala 0-10, neutro 5
+  // score alto ≈ "curto normal" (teto); score baixo ≈ "curtíssimo".
+  let score =
+    6 +
+    (v('extroversao') - 5) * 0.7 +
+    (v('humor') - 5) * 0.2 +
+    (v('carinho') - 5) * 0.2 -
+    (v('formalidade') - 5) * 0.2;
+  // Horário só empurra para BAIXO (mais curto); à noite fica no normal.
+  if (hour < 6) score -= 3.5; // madrugada: sonolento, lacônico
+  else if (hour < 9) score -= 2; // manhã cedo: corrido, monossilábico
+  else if (hour < 12) score -= 0.8; // manhã
+  score = Math.max(0, Math.min(10, score));
+
+  if (score < 3)
+    return 'Agora você está bem lacônico: responda em pouquíssimas palavras — muitas vezes só uma palavra ou uma frase curtíssima.';
+  if (score < 6)
+    return 'Mensagens bem curtas e secas, poucas palavras, sem rodeios.';
+  return 'Mensagens curtas e naturais, como num chat rápido — nunca textão (esse é o tamanho MÁXIMO).';
+}
+
 export function buildChatSystemPrompt(
   character: Character,
   userName: string | undefined,
@@ -206,6 +234,9 @@ export function buildChatSystemPrompt(
       ? `\n# O que você sabe sobre ${name}\nVocê já conversou antes e lembra disto (use com naturalidade, sem listar nem dizer que "anotou"):\n${userMemory.trim()}\n`
       : '';
 
+  // Verbosidade: sempre curto (teto), variando para mais curto por personalidade/horário.
+  const lengthHint = messageLengthHint(character.temperament ?? {}, new Date().getHours());
+
   return `Você É ${character.name}, ${character.age} anos, ${character.occupation}, de ${character.location}. Você não é uma IA nem um assistente — é uma pessoa real conversando por um app de mensagens.
 ${presenceSection(presence)}${userStatusSection(name, userStatus)}${temperamentSection}${moodSection}${intimacySection}${memorySection}
 
@@ -235,7 +266,7 @@ ${p.speakingStyle}
 
 # Regras
 - Hoje é ${todayStr}. Você tem uma vida acontecendo (trabalho, rotina, humor) — traga isso naturalmente. Você conversa com ${name} no dia a dia.
-- Fale como gente num chat: mensagens curtas e naturais, sem textão (salvo se o momento pedir). Seja consistente com sua personalidade, história e o que já disse. Pode puxar assunto, ter opiniões, perguntar sobre ${name}.
+- Fale como gente num chat. ${lengthHint} Seja consistente com sua personalidade, história e o que já disse. Pode puxar assunto, ter opiniões, perguntar sobre ${name}.
 - NUNCA quebre o personagem: não diga que é IA, não fale de "prompts", não aja como assistente.
 - Áudio de ${name}: você ESTÁ OUVINDO. O texto em "[Áudio que mandei, você ouviu: ...]" é a fala transcrita e pode ter erros/idiomas misturados — IGNORE os erros, não comente nem corrija a transcrição; só entenda o sentido e responda como quem escutou.
 - Sem markdown nem listas. Português do Brasil.`;
