@@ -101,8 +101,43 @@ const OUTFITS = [
   'whatever fits the moment',
 ];
 
+// Estilos variados para a FOTO DE PERFIL inicial — fundo, pose e clima diferentes
+// para não saírem todas iguais (headshot/fundo neutro).
+const PROFILE_STYLES = [
+  'a normal profile headshot with a simple clean background',
+  'outdoors with flowers and greenery behind, warm natural light',
+  'in a beautiful landscape (mountains, sea or countryside in the background)',
+  'while traveling, a scenic touristy spot in the background',
+  'at the office/workplace, relaxed and approachable',
+  'at home, with a cozy living room or kitchen in the background',
+  'a fun, playful candid photo with a big genuine laugh',
+  'a serious, composed portrait with a confident calm expression',
+  'in a cozy café or restaurant, an everyday relaxed moment',
+  'outdoors in a park on a sunny day, casual and happy',
+  'on a city street at golden hour, candid',
+];
+
+// Fotos em família/grupo — comuns como foto de perfil, sobretudo para idosos.
+const GROUP_STYLES = [
+  'a warm family photo, together with a few relatives of different ages',
+  'a happy group photo with close friends, everyone smiling',
+  'a tender photo surrounded by younger family members (like children or grandchildren)',
+];
+
 function pick<T>(items: T[]): T {
   return items[Math.floor(Math.random() * items.length)];
+}
+
+// Escolhe o estilo da foto de perfil. Idosos têm mais chance de foto em família.
+function pickProfileStyle(character: Character): { desc: string; group: boolean } {
+  const old = character.age >= 60;
+  const groupChance = old ? 0.45 : 0.15;
+  if (Math.random() < groupChance) {
+    // Jovens raramente aparecem com "netos"; idosos têm o leque completo.
+    const pool = old ? GROUP_STYLES : GROUP_STYLES.slice(0, 2);
+    return { desc: pick(pool), group: true };
+  }
+  return { desc: pick(PROFILE_STYLES), group: false };
 }
 
 // Resume as características do personagem num prompt de foto de perfil realista.
@@ -120,16 +155,24 @@ function buildImagePrompt(character: Character, variation: boolean): string {
     vibe ? `Vibe: ${vibe}.` : '',
   ];
 
+  let group = false;
   if (variation) {
     parts.push(
       `Keep the SAME person — same facial features, hair, age and ethnicity as described — but a DIFFERENT photo: ${pick(SCENES)}, ${pick(ANGLES)}, different outfit and lighting.`,
     );
   } else {
-    parts.push('Headshot, neutral background.');
+    // Foto de perfil inicial: cenário/pose/clima variados (não sempre o mesmo headshot).
+    const style = pickProfileStyle(character);
+    group = style.group;
+    parts.push(`Profile photo: ${style.desc}. ${pick(ANGLES)}. Varied composition and background.`);
   }
 
+  // Em fotos de grupo/família, NÃO forçar pessoa única — mas o personagem é o
+  // sujeito principal e claramente visível.
   parts.push(
-    'Photorealistic, soft natural lighting, looks like a genuine smartphone photo, face clearly visible, single person, not an illustration, not a cartoon.',
+    group
+      ? 'The described person is the clear main subject with face clearly visible; a few other people around is welcome. Photorealistic, natural lighting, looks like a genuine smartphone photo, not an illustration, not a cartoon.'
+      : 'Photorealistic, soft natural lighting, looks like a genuine smartphone photo, face clearly visible, single person, not an illustration, not a cartoon.',
   );
 
   return parts.filter(Boolean).join(' ');

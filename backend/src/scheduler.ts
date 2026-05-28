@@ -1,11 +1,12 @@
 import { randomUUID } from 'crypto';
 import {
+  decideAudioResponse,
   decidePhotoResponse,
   generateNewsMessage,
   generateProactiveMessage,
   generateReply,
 } from './ai';
-import { computeReplyDueAt, currentPresence } from './availability';
+import { computeReplyDueAt, currentPresence, isFreshConversation } from './availability';
 import { config } from './config';
 import { DEFAULT_INTIMACY, clampIntimacy } from './intimacy';
 import {
@@ -23,7 +24,7 @@ import {
 } from './messaging';
 import { moodEmoji } from './mood';
 import { ensureCharacterVoice, recordConversationImpact, refreshDailyMood } from './moodService';
-import { AUDIO_REPLY_DIRECTIVE, FOLLOWUP_DIRECTIVE } from './prompts';
+import { FOLLOWUP_DIRECTIVE, GOODNIGHT_DIRECTIVE } from './prompts';
 import { sendPush } from './push';
 import { generateSpeech } from './speech';
 import {
@@ -206,6 +207,7 @@ async function deliverFollowUp(conversationId: string, gen: number): Promise<voi
     userName: conversation.userName,
     userStatus: conversation.userStatus,
     intimacy: conversation.intimacy,
+    userMemory: conversation.userMemory,
     directive: FOLLOWUP_DIRECTIVE,
   });
   if (!text.trim()) return;
@@ -366,6 +368,7 @@ async function fireProactive(conversationId: string, now: Date): Promise<void> {
     userName: conversation.userName,
     userStatus: conversation.userStatus,
     intimacy: conversation.intimacy,
+    userMemory: conversation.userMemory,
   };
   const text = useNews
     ? await generateNewsMessage(character, history, now, ctx)
@@ -417,6 +420,69 @@ async function tick(): Promise<void> {
   }
 }
 
+// "Boa noite": quando o personagem ENTRA no sono e vocês conversaram nos últimos
+// 30 min, ele manda uma despedida. `sleepGreeted` evita repetir na mesma dormida
+// (reseta ao acordar). Roda independente das proativas.
+const GOODNIGHT_RECENT_MS = 30 * 60_000;
+const sleepGreeted = new Set<string>();
+const inProgressGoodnight = new Set<string>();
+
+async function processBedtimeGreetings(now: Date): Promise<void> {
+  for (const state of listProactiveStates()) {
+    const conversation = getConversation(state.conversationId);
+    if (!conversation) continue;
+    const found = getCharacter(conversation.characterIds[0]);
+    if (!found) continue;
+
+    // Conversa recém-criada fica sempre "acordada" — não conta como dormir.
+    const fresh = isFreshConversation(conversation.createdAt, now);
+    const asleep = !fresh && currentPresence(found, now).responsiveness === 'asleep';
+
+    if (!asleep) {
+      sleepGreeted.delete(state.conversationId); // acordou (ou fresh) → reseta
+      continue;
+    }
+    if (sleepGreeted.has(state.conversationId) || inProgressGoodnight.has(state.conversationId)) {
+      continue;
+    }
+    // Marca como "já se despediu nesta dormida" mesmo que não vá mandar (evita
+    // reavaliar a cada tick durante toda a madrugada).
+    sleepGreeted.add(state.conversationId);
+
+    // Conversaram nos últimos 30 min? (precisa de uma mensagem do USUÁRIO recente)
+    const messages = getMessages(state.conversationId);
+    let lastUserAt: string | undefined;
+    for (let i = messages.length - 1; i >= 0; i--) {
+      if (messages[i].role === 'user') {
+        lastUserAt = messages[i].createdAt;
+        break;
+      }
+    }
+    if (!lastUserAt) continue;
+    if (now.getTime() - new Date(lastUserAt).getTime() >= GOODNIGHT_RECENT_MS) continue;
+    if (hasPendingReply(state.conversationId)) continue;
+
+    inProgressGoodnight.add(state.conversationId);
+    const character = refreshDailyMood(found, now);
+    void (async () => {
+      try {
+        const text = await generateReply(character, getMessages(state.conversationId), {
+          userName: conversation.userName,
+          userStatus: conversation.userStatus,
+          intimacy: conversation.intimacy,
+          userMemory: conversation.userMemory,
+          directive: GOODNIGHT_DIRECTIVE,
+        });
+        if (text.trim()) await emitMessages(state.conversationId, character, text);
+      } catch (err) {
+        console.error('[talky] erro na mensagem de boa noite:', err);
+      } finally {
+        inProgressGoodnight.delete(state.conversationId);
+      }
+    })();
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Respostas com atraso humano
 // ---------------------------------------------------------------------------
@@ -433,27 +499,48 @@ async function deliverReply(pending: PendingReply): Promise<void> {
     const character = refreshDailyMood(found);
 
     const history = getMessages(conversation.id);
-    const text = await generateReply(character, history, {
-      userName: conversation.userName,
-      userStatus: conversation.userStatus,
-      intimacy: conversation.intimacy,
-      useWebSearch: config.webSearch.enabled && config.webSearch.inReplies,
-      // Em áudio: fala natural, sem meta-comentário sobre "mandar áudio".
-      directive: pending.asAudio ? AUDIO_REPLY_DIRECTIVE : undefined,
-    });
-    if (!text.trim()) return;
 
-    // O usuário pediu áudio: entrega uma NOTA DE VOZ (TTS), sem picotar.
+    let text: string;
     if (pending.asAudio) {
-      const delivered = await deliverVoiceReply(conversation.id, character, text);
-      if (delivered) {
-        void recordConversationImpact(conversation, character, getMessages(conversation.id)).catch(
-          () => {},
-        );
-        return;
+      // O PERSONAGEM decide se manda voz. Se não quiser, responde em TEXTO — assim
+      // não acontece o áudio dizendo "não vou mandar áudio".
+      const decision = await decideAudioResponse(character, history, lastUserText(history), {
+        userName: conversation.userName,
+        intimacy: conversation.intimacy,
+        userMemory: conversation.userMemory,
+        mood: character.mood?.label,
+      });
+      if (decision.send && decision.text.trim()) {
+        const delivered = await deliverVoiceReply(conversation.id, character, decision.text.trim());
+        if (delivered) {
+          void recordConversationImpact(conversation, character, getMessages(conversation.id)).catch(
+            () => {},
+          );
+          return;
+        }
+        // TTS indisponível/falhou: entrega o MESMO conteúdo como texto.
+        text = decision.text.trim();
+      } else {
+        // Não quis mandar áudio: a resposta dele (em texto) segue normalmente.
+        text =
+          decision.text.trim() ||
+          (await generateReply(character, history, {
+            userName: conversation.userName,
+            userStatus: conversation.userStatus,
+            intimacy: conversation.intimacy,
+            userMemory: conversation.userMemory,
+          }));
       }
-      // TTS indisponível/falhou: cai para a entrega de texto normal abaixo.
+    } else {
+      text = await generateReply(character, history, {
+        userName: conversation.userName,
+        userStatus: conversation.userStatus,
+        intimacy: conversation.intimacy,
+        userMemory: conversation.userMemory,
+        useWebSearch: config.webSearch.enabled && config.webSearch.inReplies,
+      });
     }
+    if (!text.trim()) return;
 
     // Entrega em uma ou várias mensagens, com "digitando..." por tamanho
     // (hesitante se o assunto for delicado). Retorna false se foi interrompida.
@@ -524,7 +611,11 @@ export function requestChatPhoto(conversationId: string, requestText: string): v
       if (!found) return;
       const character = refreshDailyMood(found);
       const history = getMessages(conversationId);
-      const ctx = { userName: conversation.userName, intimacy: conversation.intimacy };
+      const ctx = {
+        userName: conversation.userName,
+        intimacy: conversation.intimacy,
+        userMemory: conversation.userMemory,
+      };
       const moodLabel = character.mood?.label;
 
       // Fotos já enviadas NESTA conversa não são reusadas (a mesma pessoa sempre
@@ -660,7 +751,15 @@ export function getConversationStatus(conversationId: string): ConversationStatu
   const now = new Date();
   // Mantém o humor do dia em dia (re-sorteia ao virar o dia).
   const character = refreshDailyMood(found, now);
-  const presence = currentPresence(character, now);
+  let presence = currentPresence(character, now);
+  // Nos primeiros minutos da conversa, fica SEMPRE disponível (nunca dormindo).
+  if (isFreshConversation(conversation?.createdAt, now)) {
+    presence = {
+      ...presence,
+      state: 'online',
+      activity: presence.state === 'sleeping' ? 'disponível' : presence.activity,
+    };
+  }
   // "Digitando" aparece SÓ enquanto o personagem está de fato digitando (durante
   // a entrega). Nunca na hora do envio do usuário — começa só depois do atraso
   // de "perceber a mensagem" (>= 1s), o que evita a sensação de automação.
@@ -701,4 +800,9 @@ export function startScheduler(): void {
   } else {
     console.log('[talky] mensagens proativas desativadas (PROACTIVE_ENABLED=false).');
   }
+
+  // Despedida de "boa noite" ao entrar no sono (independe das proativas).
+  setInterval(() => {
+    void processBedtimeGreetings(new Date());
+  }, 60_000);
 }

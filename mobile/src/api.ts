@@ -60,6 +60,8 @@ export interface ConversationResponse {
   conversation: Conversation;
   characters: Character[];
   messages: Message[];
+  /** true = existem mensagens mais antigas (carregar via scroll infinito). */
+  hasMore?: boolean;
   status: ChatStatus;
 }
 
@@ -140,6 +142,16 @@ export const api = {
       },
       // Foto/áudio incluem visão/transcrição no servidor: mais tempo.
       attach?.image || attach?.audio ? 60_000 : 30_000,
+    );
+  },
+
+  // Scroll infinito: busca uma página de mensagens ANTERIORES a `beforeIso`.
+  getOlderMessages(
+    conversationId: string,
+    beforeIso: string,
+  ): Promise<{ messages: Message[]; hasMore: boolean }> {
+    return request<{ messages: Message[]; hasMore: boolean }>(
+      `/api/conversations/${conversationId}/messages?before=${encodeURIComponent(beforeIso)}`,
     );
   },
 

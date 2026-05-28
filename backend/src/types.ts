@@ -138,6 +138,13 @@ export interface Conversation {
   intimacy?: number;
   /** Quando o usuário leu a conversa pela última vez (para contagem de não lidos). */
   lastReadAt?: string;
+  /**
+   * Memória compacta sobre o usuário (o que o personagem "lembra"): trabalho,
+   * onde mora, características, gostos, segredos, conquistas, acontecimentos.
+   * Atualizada periodicamente e injetada no prompt — permite janela curta de
+   * histórico sem perder contexto de longo prazo.
+   */
+  userMemory?: string;
   createdAt: string;
 }
 

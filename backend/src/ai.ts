@@ -78,7 +78,7 @@ export async function generateAppearance(character: Character): Promise<string> 
   try {
     const resp = await anthropic.messages.create(
       {
-        model: config.model,
+        model: config.fastModel,
         max_tokens: 300,
         messages: [
           {
@@ -110,11 +110,13 @@ export async function generateCharacter(
 
   const data = extractJSON(extractText(resp.content));
 
+  // Cap no histórico: menos texto fixo no system prompt (economia recorrente de
+  // tokens), sem perder o essencial da persona. No máx 6 marcos, descrições curtas.
   const timeline = Array.isArray(data.timeline)
-    ? (data.timeline as Record<string, unknown>[]).map((t) => ({
+    ? (data.timeline as Record<string, unknown>[]).slice(0, 6).map((t) => ({
         age: String(t.age ?? ''),
-        title: String(t.title ?? ''),
-        description: String(t.description ?? ''),
+        title: truncate(String(t.title ?? ''), 80),
+        description: truncate(String(t.description ?? ''), 160),
       }))
     : [];
 
@@ -142,8 +144,8 @@ export async function generateCharacter(
       speakingStyle: String(data.speakingStyle ?? ''),
     },
     interests: asStringArray(data.interests),
-    backstory: String(data.backstory ?? ''),
-    routine: String(data.routine ?? ''),
+    backstory: truncate(String(data.backstory ?? ''), 600),
+    routine: truncate(String(data.routine ?? ''), 400),
     timeline,
     temperament,
     schedule,
@@ -155,6 +157,18 @@ export async function generateCharacter(
 
 function clamp(n: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, n));
+}
+
+// Corta um texto no limite, preferindo uma fronteira limpa (fim de frase/palavra)
+// para não cortar no meio de uma palavra. Sem reticências (texto interno do prompt).
+function truncate(s: string, max: number): string {
+  const t = s.trim();
+  if (t.length <= max) return t;
+  const cut = t.slice(0, max);
+  const boundary = Math.max(cut.lastIndexOf('. '), cut.lastIndexOf('! '), cut.lastIndexOf('? '), cut.lastIndexOf('\n'));
+  if (boundary > max * 0.5) return cut.slice(0, boundary + 1).trim();
+  const space = cut.lastIndexOf(' ');
+  return (space > max * 0.5 ? cut.slice(0, space) : cut).trim();
 }
 
 /** Normaliza qualquer indicação de gênero para 'female' | 'male' | ''. */
@@ -173,7 +187,7 @@ export async function inferGender(character: Character): Promise<string> {
   try {
     const resp = await anthropic.messages.create(
       {
-        model: config.model,
+        model: config.fastModel,
         max_tokens: 8,
         system: 'Responda APENAS com uma palavra: "feminino" ou "masculino".',
         messages: [
@@ -252,17 +266,24 @@ function normalizeSchedule(value: unknown): ScheduleBlock[] {
   return blocks.length > 0 ? blocks : defaultSchedule();
 }
 
+// Só as últimas N mensagens carregam a descrição da foto / transcrição do áudio
+// por extenso (verbosas, e só importam no turno). Nas mais antigas, o detalhe já
+// foi para a memória do usuário — então viram um marcador curto, economizando tokens.
+const MEDIA_DETAIL_RECENT = 6;
+
 function buildApiMessages(history: Message[]): ApiMessage[] {
-  return history.map((m) => {
+  const n = history.length;
+  return history.map((m, i) => {
     let content = m.text;
+    const recent = i >= n - MEDIA_DETAIL_RECENT;
     // Fotos que o usuário enviou entram no contexto como descrição em texto.
     if (m.imageDescription) {
-      const note = `[Foto que enviei: ${m.imageDescription}]`;
+      const note = recent ? `[Foto que enviei: ${m.imageDescription}]` : '[foto]';
       content = content ? `${content}\n${note}` : note;
     }
     // Áudios entram como o que foi OUVIDO (transcrição interna, não exibida).
     if (m.audioTranscript) {
-      const note = `[Áudio que mandei, você ouviu: ${m.audioTranscript}]`;
+      const note = recent ? `[Áudio que mandei, você ouviu: ${m.audioTranscript}]` : '[áudio]';
       content = content ? `${content}\n${note}` : note;
     }
     return { role: m.role === 'user' ? 'user' : 'assistant', content };
@@ -290,7 +311,7 @@ export async function interpretImage(
   try {
     const resp = await anthropic.messages.create(
       {
-        model: config.model,
+        model: config.fastModel,
         max_tokens: 300,
         messages: [
           {
@@ -331,6 +352,8 @@ interface ChatContext {
   userStatus?: string;
   /** Intimidade (0-100) do personagem com este usuário (controle interno). */
   intimacy?: number;
+  /** Memória compacta sobre o usuário (o que o personagem lembra). */
+  userMemory?: string;
   directive?: string;
   useWebSearch?: boolean;
 }
@@ -348,6 +371,7 @@ async function runChat(
     presence,
     ctx.userStatus,
     ctx.intimacy,
+    ctx.userMemory,
   );
   // Janela: só as últimas N mensagens vão ao modelo. Em conversas grandes isso
   // evita reenviar todo o histórico a cada turno (principal causa de custo).
@@ -476,7 +500,7 @@ export async function decidePhotoResponse(
 
     const resp = await anthropic.messages.create(
       {
-        model: config.model,
+        model: config.fastModel,
         max_tokens: 500,
         system,
         messages: [{ role: 'user', content: user }],
@@ -500,6 +524,59 @@ export async function decidePhotoResponse(
   }
 }
 
+export interface AudioDecision {
+  /** O personagem decidiu mandar uma nota de voz (TTS) agora? */
+  send: boolean;
+  /**
+   * Se `send`: o que ele FALA na nota de voz (texto natural pra virar áudio).
+   * Se não: a resposta dele em TEXTO (recusa/enrolação/responde escrevendo).
+   */
+  text: string;
+}
+
+/**
+ * O PERSONAGEM decide, EM PERSONAGEM, se manda um ÁUDIO agora. Evita o bug de
+ * "áudio dizendo que não vai mandar áudio": se ele não quiser, responde em TEXTO;
+ * só quando quer mandar é que o texto vira voz (TTS). Best-effort.
+ */
+export async function decideAudioResponse(
+  character: Character,
+  history: Message[],
+  requestText: string,
+  ctx: { userName?: string; intimacy?: number; userMemory?: string; mood?: string } = {},
+): Promise<AudioDecision> {
+  try {
+    const recent = history
+      .slice(-10)
+      .map((m) => `${m.role === 'user' ? 'Pessoa' : character.name}: ${m.text}`)
+      .join('\n');
+    const temperament = describeTemperament(character.temperament ?? {});
+    const memory = ctx.userMemory?.trim() ? `\nVocê lembra sobre a pessoa:\n${ctx.userMemory.trim()}` : '';
+
+    const system = `Você É ${character.name}, ${character.age} anos, ${character.occupation}. Jeito de falar: ${character.personality.speakingStyle || 'casual e informal'}.${temperament ? `\nTraços:\n${temperament}` : ''}\nHumor hoje: ${ctx.mood ?? 'normal'}. Intimidade: ${ctx.intimacy ?? 25}/100.${memory}\nVocê está num app de mensagens e PODE mandar nota de voz. Decida, EM PERSONAGEM, se manda um áudio agora. Responda SOMENTE com JSON válido, sem markdown.`;
+
+    const user = `Conversa recente:\n${recent || '(começo da conversa)'}\n\nA pessoa pediu que você responda/mande um ÁUDIO (nota de voz): "${requestText}".\n\nReaja como você reagiria DE VERDADE. Mandar ou não é decisão SUA, conforme seu jeito, humor e intimidade: se for tímido(a), estiver sem clima, em público, ou não tiver intimidade, você pode preferir responder por texto — brincar, enrolar ou só dizer que agora não dá. Se topar, manda numa boa.\n\nResponda só com JSON:\n{"send": true|false, "text": "se send=true: FALE naturalmente o que você responderia, como numa nota de voz de WhatsApp (NÃO diga 'vou te mandar um áudio', não narre, não diga 'peraí'); se send=false: sua resposta em TEXTO, no seu jeito (pode explicar que prefere não mandar áudio agora, brincar ou simplesmente responder escrevendo)"}`;
+
+    const resp = await anthropic.messages.create(
+      {
+        model: config.model,
+        max_tokens: 600,
+        system,
+        messages: [{ role: 'user', content: user }],
+      },
+      { timeout: 25_000, maxRetries: 1 },
+    );
+    const data = extractJSON(extractText(resp.content));
+    return {
+      send: Boolean(data.send),
+      text: typeof data.text === 'string' ? data.text.trim() : '',
+    };
+  } catch (err) {
+    console.warn('[talky] não foi possível decidir o áudio:', err);
+    return { send: false, text: '' };
+  }
+}
+
 export interface ConversationImpact extends MoodShift {
   /**
    * Variação de intimidade (-15..+5): bom convívio sobe devagar (+1..+3),
@@ -512,6 +589,11 @@ export interface ConversationImpact extends MoodShift {
    * "manda uma de cada vez" = positivo). 0 quando não há feedback.
    */
   splitStyleDelta: number;
+  /**
+   * Memória ATUALIZADA sobre o usuário (versão completa e compacta, já mesclada
+   * com a anterior). undefined quando não houve mudança/extração.
+   */
+  userMemory?: string;
 }
 
 /**
@@ -524,6 +606,7 @@ export async function assessConversationImpact(
   character: Character,
   history: Message[],
   intimacyLevel: number,
+  existingMemory?: string,
 ): Promise<ConversationImpact> {
   const none = { valenceDelta: 0, energyDelta: 0, intimacyDelta: 0, splitStyleDelta: 0 };
   try {
@@ -533,16 +616,20 @@ export async function assessConversationImpact(
       .join('\n');
     if (!recent.trim()) return none;
 
+    const mem = existingMemory?.trim()
+      ? `\n\nMemória atual sobre a pessoa (atualize incrementando/corrigindo):\n${existingMemory.trim()}`
+      : '';
+
     const resp = await anthropic.messages.create(
       {
-        model: config.model,
-        max_tokens: 200,
+        model: config.fastModel,
+        max_tokens: 500,
         system:
-          'Você analisa o impacto de uma conversa sobre uma pessoa: humor e intimidade. Responda SOMENTE com JSON válido, sem markdown nem texto extra.',
+          'Você analisa uma conversa: humor, intimidade e o que memorizar sobre a pessoa. Responda SOMENTE com JSON válido, sem markdown nem texto extra.',
         messages: [
           {
             role: 'user',
-            content: `Conversa recente de ${character.name}:\n\n${recent}\n\nA intimidade ATUAL de ${character.name} com a pessoa é ${intimacyLevel} numa escala de 0 (estranhos) a 100 (muito íntimos).\n\nResponda só com JSON:\n{"valenceDelta": -3..3 (mais feliz = positivo, mais triste = negativo), "energyDelta": -3..3 (mais animado = positivo, mais cansado/entediado = negativo), "intimacyDelta": -15..5 (papo bom e respeitoso sobe devagar +1..+3, momento de vínculo genuíno até +5; CAIA (-5..-15) SÓ se a pessoa claramente forçou romance/sexo pesado ou intimidade muito além do nível, foi invasiva ou desrespeitosa — perguntas pessoais normais, flerte leve ou desabafo NÃO derrubam e podem até subir um pouco), "splitStyleDelta": -30..30 (só se a pessoa deu FEEDBACK sobre COMO ${character.name} manda mensagens: pediu pra parar de mandar várias mensagens curtas/picotadas = negativo; pediu pra mandar separado/uma de cada vez = positivo; senão 0), "reason": "motivo bem curto"}\n\nSe a conversa for neutra/banal, use 0. Leve em conta o nível atual: o que é natural a 80 pode ser invasivo a 8.`,
+            content: `Conversa recente de ${character.name}:\n\n${recent}${mem}\n\nA intimidade ATUAL de ${character.name} com a pessoa é ${intimacyLevel} numa escala de 0 (estranhos) a 100 (muito íntimos).\n\nResponda só com JSON:\n{"valenceDelta": -3..3 (mais feliz=+, mais triste=-), "energyDelta": -3..3 (mais animado=+, mais cansado/entediado=-), "intimacyDelta": -15..5 (papo bom e respeitoso sobe devagar +1..+3, vínculo genuíno até +5; CAIA (-5..-15) SÓ se forçou romance/sexo pesado ou intimidade muito além do nível, foi invasiva ou desrespeitosa — perguntas pessoais normais, flerte leve ou desabafo NÃO derrubam), "splitStyleDelta": -30..30 (só com FEEDBACK sobre COMO manda mensagens: parar de picotar=negativo; mandar separado=positivo; senão 0), "reason": "motivo curto", "memory": "fatos relevantes e duradouros sobre a PESSOA (não sobre ${character.name}): nome, onde mora/trabalha, características físicas, gostos, interesses, relacionamentos, segredos, conquistas, acontecimentos importantes. Mescle com a memória atual: mantenha o que ainda vale, corrija o desatualizado, adicione o novo. Bullets curtos com '-', máx ~15 linhas, sem floreio. Se nada relevante a memorizar e não havia memória, use \\"\\""}\n\nNeutro/banal: deltas 0. Leve em conta o nível atual: o que é natural a 80 pode ser invasivo a 8.`,
           },
         ],
       },
@@ -550,12 +637,14 @@ export async function assessConversationImpact(
     );
 
     const data = extractJSON(extractText(resp.content));
+    const memory = typeof data.memory === 'string' ? data.memory.trim() : '';
     return {
       valenceDelta: clampNum(Number(data.valenceDelta), -3, 3),
       energyDelta: clampNum(Number(data.energyDelta), -3, 3),
       intimacyDelta: clampNum(Number(data.intimacyDelta), -15, 5),
       splitStyleDelta: clampNum(Number(data.splitStyleDelta), -30, 30),
       reason: typeof data.reason === 'string' ? data.reason.slice(0, 60) : undefined,
+      userMemory: memory || undefined,
     };
   } catch (err) {
     console.warn('[talky] não foi possível avaliar o impacto da conversa:', err);

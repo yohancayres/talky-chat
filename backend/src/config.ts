@@ -6,6 +6,10 @@ export const config = {
   port: Number(process.env.PORT ?? 3000),
   anthropicApiKey: process.env.ANTHROPIC_API_KEY ?? '',
   model: process.env.TALKY_MODEL ?? 'claude-opus-4-7',
+  // Modelo "barato" para tarefas mecânicas/recorrentes (avaliar humor+memória,
+  // decidir/interpretar foto, inferir gênero, descrever aparência). ~10-15x mais
+  // barato que o principal, sem perda de qualidade nessas tarefas objetivas.
+  fastModel: process.env.TALKY_FAST_MODEL ?? 'claude-haiku-4-5-20251001',
   // Persistência: com MONGODB_URI usa MongoDB; sem ela, cai no arquivo db.json
   // (apenas para desenvolvimento local). Em produção, defina MONGODB_URI.
   mongoUri: process.env.MONGODB_URI ?? '',
@@ -100,8 +104,10 @@ export const config = {
     // Multiplica a duração da "digitação" (proporcional ao tamanho da mensagem).
     typingSpeedFactor: Number(process.env.REPLY_TYPING_SPEED_FACTOR ?? 1),
     // Quantas mensagens recentes do histórico enviar ao modelo por turno.
-    // Limita o custo em conversas grandes (o persona em si vai no system prompt).
-    historyLimit: Number(process.env.REPLY_HISTORY_LIMIT ?? 30),
+    // Limita o custo em conversas grandes. A "memória do usuário" (no system
+    // prompt, cacheado) preserva o contexto de longo prazo, então a janela pode
+    // ser curta sem perder qualidade.
+    historyLimit: Number(process.env.REPLY_HISTORY_LIMIT ?? 16),
   },
   character: {
     // Personagens são GLOBAIS: ao entrar, há esta chance (0-1) de o usuário ser

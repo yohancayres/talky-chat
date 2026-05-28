@@ -3,7 +3,7 @@ import { config } from './config';
 import { DEFAULT_INTIMACY, applyIntimacyDelta } from './intimacy';
 import { DEFAULT_SPLIT_STYLE } from './messaging';
 import { applyMoodShift, ensureDailyMood } from './mood';
-import { pickVoiceForProvider, voiceMatchesProvider } from './speech';
+import { pickVoiceForProvider, voiceFitsCharacter, voiceMatchesProvider } from './speech';
 import { getCharacter, getConversation, saveCharacter, saveConversation } from './store';
 import { Character, Conversation, Message } from './types';
 
@@ -23,7 +23,11 @@ export async function ensureCharacterVoice(character: Character): Promise<Charac
       saveCharacter(fresh);
     }
   }
-  if (voiceMatchesProvider(fresh.voice)) return fresh;
+  // Voz do provedor certo E compatível com a idade? Então mantém. Senão, re-escolhe
+  // (auto-corrige idosos que ficaram com voz jovem de antes desta lógica).
+  if (voiceMatchesProvider(fresh.voice) && (await voiceFitsCharacter(fresh.voice!, fresh))) {
+    return fresh;
+  }
   const voice = await pickVoiceForProvider(fresh);
   if (!voice) return fresh; // não conseguiu (ex: busca de vozes falhou) — segue sem
   const updated = { ...fresh, voice };
@@ -71,7 +75,7 @@ export async function recordConversationImpact(
   lastAssessedCount.set(conversation.id, history.length);
 
   const level = conversation.intimacy ?? DEFAULT_INTIMACY;
-  const impact = await assessConversationImpact(character, history, level);
+  const impact = await assessConversationImpact(character, history, level, conversation.userMemory);
 
   // Personagem (global): humor + estilo de picotar. Relê e salva uma vez só.
   const freshChar = getCharacter(character.id) ?? character;
@@ -92,13 +96,19 @@ export async function recordConversationImpact(
   }
   if (charChanged) saveCharacter(updatedChar);
 
-  // Conversa (por usuário): intimidade. Ganhos usam a taxa própria do personagem;
-  // o atrito (queda) não é amortecido. Relê para não sobrescrever mudanças.
-  if (intimacyOn && impact.intimacyDelta !== 0) {
+  // Conversa (por usuário): intimidade + memória do usuário. Relê e salva uma vez
+  // só, juntando as duas mudanças (evita sobrescrever uma com a outra).
+  const intimacyChanged = intimacyOn && impact.intimacyDelta !== 0;
+  const memoryChanged = Boolean(impact.userMemory && impact.userMemory !== conversation.userMemory);
+  if (intimacyChanged || memoryChanged) {
     const freshConv = getConversation(conversation.id) ?? conversation;
-    const gain = freshChar.intimacyGain ?? 1;
-    const delta = impact.intimacyDelta > 0 ? impact.intimacyDelta * gain : impact.intimacyDelta;
-    const next = applyIntimacyDelta(freshConv.intimacy ?? DEFAULT_INTIMACY, delta);
-    saveConversation({ ...freshConv, intimacy: next });
+    let next = { ...freshConv };
+    if (intimacyChanged) {
+      const gain = freshChar.intimacyGain ?? 1;
+      const delta = impact.intimacyDelta > 0 ? impact.intimacyDelta * gain : impact.intimacyDelta;
+      next.intimacy = applyIntimacyDelta(freshConv.intimacy ?? DEFAULT_INTIMACY, delta);
+    }
+    if (memoryChanged) next.userMemory = impact.userMemory;
+    saveConversation(next);
   }
 }

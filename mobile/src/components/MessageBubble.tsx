@@ -1,6 +1,7 @@
 import { useAudioPlayer, useAudioPlayerStatus } from 'expo-audio';
 import React, { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Animated, Image, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Image } from 'expo-image';
+import { ActivityIndicator, Animated, Pressable, StyleSheet, Text, View } from 'react-native';
 import { api } from '../api';
 import { haptics } from '../haptics';
 import { colors, radius } from '../theme';
@@ -77,7 +78,9 @@ function ImageAttachment({ url, tint }: { url: string; tint: string }) {
       <Image
         source={{ uri }}
         style={styles.image}
-        resizeMode="cover"
+        contentFit="cover"
+        transition={250}
+        cachePolicy="memory-disk"
         onLoad={() => setLoaded(true)}
         onError={() => setFailed(true)}
       />

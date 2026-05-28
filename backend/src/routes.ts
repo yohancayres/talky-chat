@@ -2,9 +2,15 @@ import { getAuth } from '@clerk/express';
 import { randomUUID } from 'crypto';
 import { Router } from 'express';
 import type { Request } from 'express';
-import { generateAppearance, generateCharacter, generateReply, interpretImage } from './ai';
+import {
+  decideAudioResponse,
+  generateAppearance,
+  generateCharacter,
+  generateReply,
+  interpretImage,
+} from './ai';
 import { transcribeAudio } from './audio';
-import { computeReplyDueAt } from './availability';
+import { computeReplyDueAt, isFreshConversation } from './availability';
 import { config } from './config';
 import {
   clearAvatarGenerating,
@@ -17,7 +23,7 @@ import {
 import { ensureCharacterVoice, recordConversationImpact, refreshDailyMood } from './moodService';
 import { DEFAULT_INTIMACY } from './intimacy';
 import { DEFAULT_SPLIT_STYLE, splitMessages } from './messaging';
-import { AUDIO_REPLY_DIRECTIVE, INTRO_DIRECTIVE, isAudioRequest, isPhotoRequest } from './prompts';
+import { INTRO_DIRECTIVE, isAudioRequest, isPhotoRequest } from './prompts';
 import { generateSpeech } from './speech';
 import {
   bumpSequence,
@@ -45,6 +51,9 @@ import {
 import { Character, Conversation, Message } from './types';
 
 export const router = Router();
+
+// Quantas mensagens por página (carga inicial e scroll infinito pra cima).
+const MESSAGES_PAGE = 30;
 
 // Id do usuário autenticado (Clerk). Com auth ligada, vem SEMPRE do token —
 // nunca confiamos em userId vindo do corpo/URL. Com auth desligada (dev), cai
@@ -167,8 +176,18 @@ router.get('/conversations/:id', (req, res) => {
   const characters = conversation.characterIds
     .map(getCharacter)
     .filter((c): c is Character => Boolean(c));
-  const messages = getMessages(conversation.id);
-  res.json({ conversation, characters, messages, status: getConversationStatus(conversation.id) });
+  // Paginação: manda só as últimas N; o app busca as antigas via ?before= ao
+  // rolar pra cima. `hasMore` diz se ainda existe histórico anterior.
+  const all = getMessages(conversation.id);
+  const messages = all.slice(-MESSAGES_PAGE);
+  const hasMore = all.length > messages.length;
+  res.json({
+    conversation,
+    characters,
+    messages,
+    hasMore,
+    status: getConversationStatus(conversation.id),
+  });
 });
 
 // Exclui a conversa do usuário. O personagem permanece no pool global (você
@@ -340,8 +359,10 @@ router.post('/conversations/:id/user-status', (req, res) => {
   res.json({ ok: true, userStatus: value || null });
 });
 
-// Polling: retorna apenas as mensagens criadas depois de `after` (ISO).
-// Usado pelo app para receber mensagens proativas e respostas em tempo quase real.
+// Polling/paginação:
+//  - ?after=<ISO>  → mensagens criadas DEPOIS (proativas e respostas, quase real).
+//  - ?before=<ISO> → página de mensagens ANTERIORES (scroll infinito pra cima),
+//                    no máximo MESSAGES_PAGE, com `hasMore` indicando se há mais.
 router.get('/conversations/:id/messages', (req, res) => {
   const conversation = getConversation(req.params.id);
   if (!conversation) {
@@ -352,11 +373,18 @@ router.get('/conversations/:id/messages', (req, res) => {
     res.status(403).json({ error: 'Sem acesso a esta conversa.' });
     return;
   }
-  const after = typeof req.query.after === 'string' ? req.query.after : undefined;
-  let messages = getMessages(conversation.id);
-  if (after) {
-    messages = messages.filter((m) => m.createdAt > after);
+  const all = getMessages(conversation.id);
+
+  const before = typeof req.query.before === 'string' ? req.query.before : undefined;
+  if (before) {
+    const older = all.filter((m) => m.createdAt < before);
+    const page = older.slice(-MESSAGES_PAGE);
+    res.json({ messages: page, hasMore: older.length > page.length });
+    return;
   }
+
+  const after = typeof req.query.after === 'string' ? req.query.after : undefined;
+  const messages = after ? all.filter((m) => m.createdAt > after) : all;
   res.json({ messages, status: getConversationStatus(conversation.id) });
 });
 
@@ -492,6 +520,7 @@ router.post('/conversations/:id/messages', async (req, res) => {
           getUserActivity(conversation.id),
           conversation.intimacy,
           idleMs,
+          isFreshConversation(conversation.createdAt, now),
         );
         addPendingReply({
           id: randomUUID(),
@@ -507,35 +536,56 @@ router.post('/conversations/:id/messages', async (req, res) => {
 
     // Modo imediato (atraso desligado).
     const history = getMessages(conversation.id);
-    const replyText = await generateReply(character, history, {
-      userName,
-      userStatus: conversation.userStatus,
-      intimacy: conversation.intimacy,
-      useWebSearch: config.webSearch.enabled && config.webSearch.inReplies,
-      directive: wantsAudio ? AUDIO_REPLY_DIRECTIVE : undefined,
-    });
 
-    // Pediu áudio: responde com uma nota de voz (TTS), sem picotar.
+    let replyText: string;
     if (wantsAudio) {
-      const voiced = await ensureCharacterVoice(character);
-      const audioUrl = (await generateSpeech(voiced, replyText, { mood: voiced.mood?.label })) ?? undefined;
-      if (audioUrl) {
-        const voiceMsg: Message = {
-          id: randomUUID(),
-          conversationId: conversation.id,
-          role: 'character',
-          senderId: character.id,
-          senderName: character.name,
-          text: replyText,
-          audioUrl,
-          createdAt: new Date().toISOString(),
-        };
-        addMessage(voiceMsg);
-        touchProactive(conversation.id);
-        res.json({ userMessage, replies: [voiceMsg], status: getConversationStatus(conversation.id) });
-        return;
+      // O personagem decide se manda voz; se não quiser, responde em texto.
+      const decision = await decideAudioResponse(character, history, commandText, {
+        userName,
+        intimacy: conversation.intimacy,
+        userMemory: conversation.userMemory,
+        mood: character.mood?.label,
+      });
+      if (decision.send && decision.text.trim()) {
+        const voiced = await ensureCharacterVoice(character);
+        const audioUrl =
+          (await generateSpeech(voiced, decision.text.trim(), { mood: voiced.mood?.label })) ??
+          undefined;
+        if (audioUrl) {
+          const voiceMsg: Message = {
+            id: randomUUID(),
+            conversationId: conversation.id,
+            role: 'character',
+            senderId: character.id,
+            senderName: character.name,
+            text: decision.text.trim(),
+            audioUrl,
+            createdAt: new Date().toISOString(),
+          };
+          addMessage(voiceMsg);
+          touchProactive(conversation.id);
+          res.json({ userMessage, replies: [voiceMsg], status: getConversationStatus(conversation.id) });
+          return;
+        }
+        replyText = decision.text.trim(); // TTS falhou → texto
+      } else {
+        replyText =
+          decision.text.trim() ||
+          (await generateReply(character, history, {
+            userName,
+            userStatus: conversation.userStatus,
+            intimacy: conversation.intimacy,
+            userMemory: conversation.userMemory,
+          }));
       }
-      // TTS indisponível/falhou: cai para texto normal abaixo.
+    } else {
+      replyText = await generateReply(character, history, {
+        userName,
+        userStatus: conversation.userStatus,
+        intimacy: conversation.intimacy,
+        userMemory: conversation.userMemory,
+        useWebSearch: config.webSearch.enabled && config.webSearch.inReplies,
+      });
     }
 
     // Picota conforme o estilo do personagem (sem atraso no modo imediato).

@@ -1,8 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
   Animated,
-  KeyboardAvoidingView,
-  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -10,6 +8,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import { api, GenerateResponse } from '../api';
 import { haptics } from '../haptics';
 import { colors, radius } from '../theme';
@@ -102,10 +101,7 @@ export function OnboardingScreen({
   }
 
   return (
-    <KeyboardAvoidingView
-      style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-    >
+    <KeyboardAvoidingView style={styles.container} behavior="padding">
       <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
         <Text style={styles.logoEmoji}>💬</Text>
         <Text style={styles.title}>{isNewContact ? 'Novo contato' : 'AmyChat'}</Text>

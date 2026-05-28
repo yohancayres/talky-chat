@@ -4,6 +4,16 @@ import { Character, Responsiveness, ScheduleBlock } from './types';
 
 export type StatusState = 'online' | 'busy' | 'sleeping';
 
+// Janela de "boas-vindas" após criar a conversa: responde rápido e fica sempre
+// disponível (nunca dormindo). Depois disso, normaliza para o comportamento normal.
+export const FRESH_CONVERSATION_MS = 10 * 60_000;
+
+/** A conversa foi criada há menos de FRESH_CONVERSATION_MS? */
+export function isFreshConversation(createdAt: string | undefined, now: Date = new Date()): boolean {
+  if (!createdAt) return false;
+  return now.getTime() - new Date(createdAt).getTime() < FRESH_CONVERSATION_MS;
+}
+
 export interface Presence {
   activity: string;
   responsiveness: Responsiveness;
@@ -125,7 +135,14 @@ export function computeReplyDueAt(
   userActivityByHour?: number[],
   intimacy?: number,
   idleMs?: number,
+  fresh?: boolean,
 ): { dueAt: Date; sleeping: boolean } {
+  // Conversa recém-criada (primeiros minutos): responde rápido e NUNCA dormindo,
+  // pra dar as boas-vindas sem demora. Depois normaliza para o comportamento normal.
+  if (fresh) {
+    return { dueAt: new Date(now.getTime() + randomInt(2000, 15000)), sleeping: false };
+  }
+
   const schedule = scheduleOf(character);
   const block = currentBlock(schedule, now.getHours());
 

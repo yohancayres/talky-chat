@@ -78,7 +78,11 @@ function pitchScore(character: Character): number {
   const t = character.temperament ?? {};
   const v = (k: string) => t[k] ?? 5;
   let s = 0;
-  if (character.age >= 45) s -= 2;
+  // Idosos: voz mais grave/assentada (reforça o timbre quando a voz escolhida
+  // ainda soa jovem). Quanto mais velho, mais grave.
+  if (character.age >= 65) s -= 3.5;
+  else if (character.age >= 55) s -= 2.8;
+  else if (character.age >= 45) s -= 2;
   else if (character.age >= 35) s -= 1;
   else if (character.age <= 22) s += 1;
   s += (v('docura') - 5) * 0.2;
@@ -257,9 +261,24 @@ function scoreVoice(voice: ElVoice, character: Character): number {
   if (/conversational|casual|chatty|social|friendly|relaxed|natural/.test(voice.text)) score += 5;
   if (/narrat|audiobook|news|announc|professional|formal|documentary|presenter|broadcast/.test(voice.text))
     score -= 6;
-  // Idade aproximada.
-  const ageWant = character.age < 30 ? 'young' : character.age < 50 ? 'middle' : 'old';
-  if (voice.text.includes(ageWant)) score += 2;
+  // Idade — peso FORTE, sobretudo para idosos: voz de jovem num personagem idoso
+  // soa errado. Os labels da ElevenLabs são "young" / "middle_aged" / "old".
+  const age = character.age;
+  const isOld = /\bold\b|elderly|senior|mature|aged|grand/.test(voice.text);
+  const isYoung = /young|youth|teen|child|girl|boy/.test(voice.text);
+  if (age >= 60) {
+    if (isOld) score += 10;
+    if (isYoung) score -= 12; // nunca uma voz jovem para idoso, se houver alternativa
+  } else if (age >= 50) {
+    if (isOld || /middle/.test(voice.text)) score += 5;
+    if (isYoung) score -= 5;
+  } else if (age < 25) {
+    if (isYoung) score += 3;
+    if (isOld) score -= 5;
+  } else if (age < 40) {
+    if (/middle|young|adult/.test(voice.text)) score += 1.5;
+    if (isOld) score -= 2;
+  }
   // Descritores ligados ao temperamento.
   for (const d of desiredDescriptors(character.temperament ?? {})) {
     if (voice.text.includes(d)) score += 1.5;
@@ -279,6 +298,26 @@ async function pickElevenVoice(character: Character): Promise<string> {
     .map((v) => ({ v, s: scoreVoice(v, character) + Math.random() * 0.9 }))
     .sort((a, b) => b.s - a.s);
   return ranked[0].v.id;
+}
+
+/**
+ * A voz guardada combina com a IDADE do personagem? Evita que idosos fiquem com
+ * voz jovem (e vice-versa) mesmo já tendo uma voz atribuída antes desta lógica.
+ * Best-effort: se não conseguir avaliar (voz não encontrada), não força troca.
+ */
+export async function voiceFitsCharacter(
+  voiceId: string,
+  character: Character,
+): Promise<boolean> {
+  if (config.tts.provider !== 'elevenlabs') return true;
+  const voices = await getElevenVoices();
+  const v = voices.find((x) => x.id === voiceId);
+  if (!v) return true;
+  const isYoung = /young|youth|teen|child/.test(v.text);
+  const isOld = /\bold\b|elderly|senior|mature|aged/.test(v.text);
+  if (character.age >= 60 && isYoung) return false; // idoso com voz jovem
+  if (character.age < 25 && isOld) return false; // jovem com voz de idoso
+  return true;
 }
 
 /** O `voice` guardado pertence ao provedor ativo? (senão, precisa re-atribuir). */

@@ -56,7 +56,7 @@ async function main(): Promise<void> {
   await initStore();
   app.listen(config.port, () => {
     console.log(`[talky] backend rodando em http://localhost:${config.port}`);
-    console.log(`[talky] modelo: ${config.model}`);
+    console.log(`[talky] modelo: ${config.model} | rápido (auxiliares): ${config.fastModel}`);
     startScheduler();
   });
 }

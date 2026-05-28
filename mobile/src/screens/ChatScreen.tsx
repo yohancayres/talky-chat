@@ -1,13 +1,12 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  ActivityIndicator,
   Alert,
   Animated,
   AppState,
   Dimensions,
   FlatList,
   Image,
-  Keyboard,
-  KeyboardAvoidingView,
   NativeScrollEvent,
   NativeSyntheticEvent,
   PanResponder,
@@ -29,6 +28,8 @@ import {
 } from 'expo-audio';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as ImagePicker from 'expo-image-picker';
+import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
+import Reanimated, { FadeInDown, FadeOutDown } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { api } from '../api';
 import { Avatar } from '../components/Avatar';
@@ -137,18 +138,10 @@ export function ChatScreen({
   onReset: () => void;
 }) {
   const insets = useSafeAreaInsets();
-  // Com o teclado aberto, não reservamos o espaço da barra de navegação no
-  // rodapé (ela fica atrás do teclado) — evita um vão feio acima do teclado.
-  const [keyboardUp, setKeyboardUp] = useState(false);
-  useEffect(() => {
-    const show = Keyboard.addListener('keyboardDidShow', () => setKeyboardUp(true));
-    const hide = Keyboard.addListener('keyboardDidHide', () => setKeyboardUp(false));
-    return () => {
-      show.remove();
-      hide.remove();
-    };
-  }, []);
-  const inputPadBottom = keyboardUp ? 12 : Math.max(insets.bottom, 12);
+  // Padding do rodapé reserva o espaço da barra de navegação do Android. Fica
+  // CONSTANTE de propósito: mudá-lo durante o ciclo do teclado dessincronizava a
+  // medição do KeyboardAvoidingView ("height") e deixava ~10px de resíduo ao fechar.
+  const inputPadBottom = Math.max(insets.bottom, 12);
   const [character, setCharacter] = useState<Character>(initialCharacter);
   const [regeneratingPhoto, setRegeneratingPhoto] = useState(false);
   const [messages, setMessages] = useState<Message[]>(initialMessages);
@@ -168,9 +161,47 @@ export function ChatScreen({
   const listRef = useRef<FlatList<Row>>(null);
   const atBottomRef = useRef(true);
 
+  // Paginação (scroll infinito pra cima): carregamos as últimas 30 e buscamos as
+  // anteriores ao rolar até o topo. Refs evitam closures velhas no onScroll.
+  const messagesRef = useRef<Message[]>(initialMessages);
+  const hasMoreRef = useRef<boolean>(initialMessages.length >= 30);
+  const loadingOlderRef = useRef(false);
+  const [loadingOlder, setLoadingOlder] = useState(false);
+
   const lastSyncRef = useRef<string>(
     initialMessages.length ? initialMessages[initialMessages.length - 1].createdAt : '',
   );
+
+  // Mantém o ref espelhando as mensagens (para o loadOlder ler sem recriar callbacks).
+  useEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
+
+  // Carrega uma página de mensagens mais antigas (topo). O maintainVisibleContentPosition
+  // do FlatList segura a posição visível ao inserir os itens acima.
+  const loadOlder = useCallback(async () => {
+    if (loadingOlderRef.current || !hasMoreRef.current) return;
+    const oldest = messagesRef.current[0]?.createdAt;
+    if (!oldest) return;
+    loadingOlderRef.current = true;
+    setLoadingOlder(true);
+    try {
+      const res = await api.getOlderMessages(conversationId, oldest);
+      if (res.messages.length) {
+        setMessages((prev) => {
+          const known = new Set(prev.map((m) => m.id));
+          const older = res.messages.filter((m) => !known.has(m.id));
+          return older.length ? [...older, ...prev] : prev;
+        });
+      }
+      hasMoreRef.current = res.hasMore;
+    } catch {
+      // silencioso: tenta de novo no próximo scroll
+    } finally {
+      loadingOlderRef.current = false;
+      setLoadingOlder(false);
+    }
+  }, [conversationId]);
 
   // Ao abrir a conversa, marca como lida.
   useEffect(() => {
@@ -460,14 +491,19 @@ export function ChatScreen({
     }
   }
 
-  const onScroll = useCallback((e: NativeSyntheticEvent<NativeScrollEvent>) => {
-    const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
-    const distanceFromBottom = contentSize.height - (layoutMeasurement.height + contentOffset.y);
-    const atBottom = distanceFromBottom < 120;
-    atBottomRef.current = atBottom;
-    setShowScrollDown(!atBottom);
-    if (atBottom) setUnseenCount(0);
-  }, []);
+  const onScroll = useCallback(
+    (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+      const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
+      const distanceFromBottom = contentSize.height - (layoutMeasurement.height + contentOffset.y);
+      const atBottom = distanceFromBottom < 120;
+      atBottomRef.current = atBottom;
+      setShowScrollDown(!atBottom);
+      if (atBottom) setUnseenCount(0);
+      // Perto do topo: busca a página anterior (scroll infinito).
+      if (contentOffset.y < 80) void loadOlder();
+    },
+    [loadOlder],
+  );
 
   const isTyping = status?.typing ?? false;
   const photoGenerating = status?.photoGenerating ?? false;
@@ -546,8 +582,8 @@ export function ChatScreen({
     >
     <KeyboardAvoidingView
       style={styles.container}
-      // Com edge-to-edge no Android a janela não redimensiona sozinha, então o
-      // teclado cobria o input. "padding" nos dois empurra o input acima dele.
+      // KeyboardAvoidingView da react-native-keyboard-controller: lida com
+      // edge-to-edge no Android corretamente (sem resíduo). "padding" nos dois.
       behavior="padding"
     >
       <View style={[styles.header, { paddingTop: insets.top + 10 }]}>
@@ -608,9 +644,26 @@ export function ChatScreen({
           contentContainerStyle={styles.listContent}
           onScroll={onScroll}
           scrollEventThrottle={16}
+          // Arrasta as mensagens pra baixo e o teclado some acompanhando o dedo.
+          keyboardDismissMode="interactive"
+          keyboardShouldPersistTaps="handled"
+          // Mantém a posição visível ao inserir mensagens antigas no topo (paginação).
+          maintainVisibleContentPosition={{ minIndexForVisible: 0 }}
+          // Performance em conversas longas.
+          removeClippedSubviews
+          initialNumToRender={20}
+          maxToRenderPerBatch={12}
+          windowSize={11}
           onContentSizeChange={() => {
             if (atBottomRef.current) scrollToEnd(false);
           }}
+          ListHeaderComponent={
+            loadingOlder ? (
+              <View style={styles.loadingOlder}>
+                <ActivityIndicator color={colors.muted} />
+              </View>
+            ) : null
+          }
           ListFooterComponent={
             recordingAudio ? (
               <View style={styles.photoPending}>
@@ -642,16 +695,22 @@ export function ChatScreen({
         />
 
         {showScrollDown && (
-          <Pressable style={styles.scrollDown} onPress={() => scrollToEnd()}>
-            {unseenCount > 0 && (
-              <View style={styles.scrollDownBadge}>
-                <Text style={styles.scrollDownBadgeText}>
-                  {unseenCount > 9 ? '9+' : unseenCount}
-                </Text>
-              </View>
-            )}
-            <Text style={styles.scrollDownIcon}>⌄</Text>
-          </Pressable>
+          <Reanimated.View
+            entering={FadeInDown.duration(160)}
+            exiting={FadeOutDown.duration(140)}
+            style={styles.scrollDownWrap}
+          >
+            <Pressable style={styles.scrollDown} onPress={() => scrollToEnd()}>
+              {unseenCount > 0 && (
+                <View style={styles.scrollDownBadge}>
+                  <Text style={styles.scrollDownBadgeText}>
+                    {unseenCount > 9 ? '9+' : unseenCount}
+                  </Text>
+                </View>
+              )}
+              <Text style={styles.scrollDownIcon}>⌄</Text>
+            </Pressable>
+          </Reanimated.View>
         )}
       </View>
 
@@ -820,6 +879,7 @@ const styles = StyleSheet.create({
   statusChipTextActive: { color: '#FFFFFF', fontWeight: '600' },
   listWrap: { flex: 1 },
   listContent: { paddingVertical: 12, flexGrow: 1 },
+  loadingOlder: { paddingVertical: 14, alignItems: 'center' },
   divider: { alignItems: 'center', marginVertical: 12 },
   dividerText: {
     fontSize: 12,
@@ -858,10 +918,8 @@ const styles = StyleSheet.create({
     marginTop: 6,
     lineHeight: 21,
   },
+  scrollDownWrap: { position: 'absolute', right: 16, bottom: 16 },
   scrollDown: {
-    position: 'absolute',
-    right: 16,
-    bottom: 16,
     width: 44,
     height: 44,
     borderRadius: 22,

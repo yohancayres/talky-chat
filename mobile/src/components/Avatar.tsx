@@ -1,5 +1,6 @@
+import { Image } from 'expo-image';
 import React, { useEffect, useState } from 'react';
-import { Image, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
 import { api } from '../api';
 
 type AvatarLike = { photoUrl?: string; avatar: { emoji: string; color: string } };
@@ -19,6 +20,9 @@ export function Avatar({ character, size }: { character: AvatarLike; size: numbe
         source={{ uri }}
         style={{ width: size, height: size, borderRadius: radius }}
         onError={() => setFailed(true)}
+        contentFit="cover"
+        transition={200}
+        cachePolicy="memory-disk"
       />
     );
   }

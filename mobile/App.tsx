@@ -4,6 +4,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { StatusBar } from 'expo-status-bar';
 import React, { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
+import { KeyboardProvider } from 'react-native-keyboard-controller';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { api, GenerateResponse, setAuthTokenGetter } from './src/api';
 import { registerForPushToken } from './src/push';
@@ -241,8 +242,10 @@ export default function App() {
   return (
     <ClerkProvider publishableKey={CLERK_PUBLISHABLE_KEY} tokenCache={tokenCache}>
       <SafeAreaProvider>
-        <StatusBar style="dark" />
-        <Root />
+        <KeyboardProvider>
+          <StatusBar style="dark" />
+          <Root />
+        </KeyboardProvider>
       </SafeAreaProvider>
     </ClerkProvider>
   );
@@ -250,10 +253,12 @@ export default function App() {
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
-  // O chat fica por cima da lista (que segue montada atrás). No Android, o header
-  // da lista tem elevation e "furava" por cima — elevation/zIndex altos + fundo
-  // opaco garantem que o chat cubra a lista.
-  chatOverlay: { backgroundColor: colors.bg, elevation: 12, zIndex: 10 },
+  // O chat fica por cima da lista (que segue montada atrás). elevation/zIndex
+  // altos resolvem o stacking do Android (o header da lista "furava" por cima).
+  // SEM backgroundColor aqui: o conteúdo do chat (Animated.View) já é opaco e é
+  // ele que desliza no swipe — um fundo opaco no overlay parado tampava a lista
+  // (revelava branco em vez de revelar a lista atrás, no swipe-back do iOS).
+  chatOverlay: { elevation: 12, zIndex: 10 },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32 },
   errorTitle: { fontSize: 20, fontWeight: '700', color: colors.text, marginBottom: 10 },
   errorText: { fontSize: 15, color: colors.danger, textAlign: 'center', marginBottom: 12 },
