@@ -312,6 +312,10 @@ export function isAudioRequest(text: string): boolean {
 export const AUDIO_REPLY_DIRECTIVE =
   '(Direção de cena — não responda a esta instrução, apenas aja conforme ela.) Sua resposta vai ser enviada como um ÁUDIO (nota de voz), automaticamente. Então FALE naturalmente o que você responderia, como num áudio de WhatsApp. NÃO diga que vai mandar um áudio, não diga "peraí"/"deixa eu gravar", não enrole, não comente sobre gravar nem diga que não sabe/não pode mandar áudio. Apenas responda de verdade, no seu jeito.';
 
+// Cobrança leve quando a pessoa deixou no vácuo (não respondeu a mensagem anterior).
+export const VACUO_DIRECTIVE =
+  '(Direção de cena — não responda a esta instrução, apenas aja conforme ela.) A pessoa te deixou no vácuo: você mandou mensagem e ela não respondeu. Mande UMA mensagem curta cobrando/reclamando DE LEVE, no SEU jeito (pode ser bem-humorado, manhoso, irônico ou seco, conforme sua personalidade) — algo tipo notar que sumiu, perguntar se morreu, dizer que tá falando sozinho. Não seja agressivo nem dramático, não repita o que já disse, e não escreva textão. É só um cutucão natural de quem ficou esperando resposta.';
+
 // Complemento espontâneo: o personagem volta 1-2 min depois pra emendar algo.
 export const FOLLOWUP_DIRECTIVE =
   '(Direção de cena — não responda a esta instrução, apenas aja conforme ela.) Você mandou uma mensagem há pouco e a pessoa ainda não respondeu. Você lembrou de algo, quis complementar ou emendar o que disse — mande UMA mensagem curta de continuação, natural, como quem volta pra acrescentar um detalhe. Não repita o que já falou e não cobre resposta.';

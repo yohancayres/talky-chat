@@ -12,6 +12,7 @@ import {
 } from 'react-native';
 import { api } from '../api';
 import { Avatar } from '../components/Avatar';
+import { displayName, useContactNames } from '../contactNames';
 import { haptics } from '../haptics';
 import { colors, radius, shadow } from '../theme';
 import { formatListTime } from '../time';
@@ -33,6 +34,13 @@ export function ConversationListScreen({
   const [items, setItems] = useState<ConversationSummary[]>(cachedConversations);
   const [loading, setLoading] = useState(cachedConversations.length === 0);
   const [refreshing, setRefreshing] = useState(false);
+  const contactNames = useContactNames(); // apelidos locais
+
+  const nameOf = useCallback(
+    (item: ConversationSummary) =>
+      item.character ? displayName(item.character, contactNames) : item.conversation.title,
+    [contactNames],
+  );
 
   const load = useCallback(async () => {
     try {
@@ -54,7 +62,7 @@ export function ConversationListScreen({
 
   useEffect(() => {
     load();
-    const interval = setInterval(load, 10000);
+    const interval = setInterval(load, 8000);
     const sub = AppState.addEventListener('change', (s) => {
       if (s === 'active') load();
     });
@@ -79,7 +87,7 @@ export function ConversationListScreen({
 
   const handleDelete = useCallback(
     (item: ConversationSummary) => {
-      const name = item.character?.name ?? item.conversation.title;
+      const name = nameOf(item);
       haptics.selection();
       Alert.alert(
         'Excluir conversa',
@@ -103,11 +111,11 @@ export function ConversationListScreen({
         ],
       );
     },
-    [load],
+    [load, nameOf],
   );
 
   function renderItem({ item }: { item: ConversationSummary }) {
-    const name = item.character?.name ?? item.conversation.title;
+    const name = nameOf(item);
     const hasUnread = item.unread > 0;
     const preview = item.lastMessage
       ? `${item.lastMessage.role === 'user' ? 'Você: ' : ''}${item.lastMessage.text}`
@@ -171,6 +179,7 @@ export function ConversationListScreen({
       ) : (
         <FlatList
           data={items}
+          extraData={contactNames}
           keyExtractor={(i) => i.conversation.id}
           renderItem={renderItem}
           ItemSeparatorComponent={() => <View style={styles.separator} />}

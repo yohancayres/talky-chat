@@ -33,6 +33,7 @@ import Reanimated, { FadeInDown, FadeOutDown } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { api } from '../api';
 import { Avatar } from '../components/Avatar';
+import { displayName, useContactNames } from '../contactNames';
 import { CharacterProfileModal } from '../components/CharacterProfileModal';
 import { MessageBubble } from '../components/MessageBubble';
 import { TypingIndicator } from '../components/TypingIndicator';
@@ -143,6 +144,10 @@ export function ChatScreen({
   // medição do KeyboardAvoidingView ("height") e deixava ~10px de resíduo ao fechar.
   const inputPadBottom = Math.max(insets.bottom, 12);
   const [character, setCharacter] = useState<Character>(initialCharacter);
+  // Apelido local do contato (se definido); senão, o nome real do personagem.
+  const contactNames = useContactNames();
+  const contactName = displayName(character, contactNames);
+  const contactFirst = contactName.split(' ')[0];
   const [regeneratingPhoto, setRegeneratingPhoto] = useState(false);
   const [messages, setMessages] = useState<Message[]>(initialMessages);
   const [pendingIds, setPendingIds] = useState<Set<string>>(new Set());
@@ -597,7 +602,7 @@ export function ChatScreen({
           </View>
           <View style={styles.headerInfo}>
             <Text style={styles.headerName} numberOfLines={1}>
-              {character.name}
+              {contactName}
               {status?.moodEmoji ? ` ${status.moodEmoji}` : ''}
             </Text>
             <Text
@@ -686,9 +691,9 @@ export function ChatScreen({
           ListEmptyComponent={
             <View style={styles.emptyChat}>
               <Avatar character={character} size={72} />
-              <Text style={styles.emptyChatName}>{character.name}</Text>
+              <Text style={styles.emptyChatName}>{contactName}</Text>
               <Text style={styles.emptyChatHint}>
-                Diga oi para {character.name.split(' ')[0]} e comece a conversa.
+                Diga oi para {contactFirst} e comece a conversa.
               </Text>
             </View>
           }
@@ -755,7 +760,7 @@ export function ChatScreen({
             </Pressable>
             <TextInput
               style={styles.input}
-              placeholder={`Mensagem para ${character.name.split(' ')[0]}...`}
+              placeholder={`Mensagem para ${contactFirst}...`}
               placeholderTextColor={colors.muted}
               value={draft}
               onChangeText={setDraft}

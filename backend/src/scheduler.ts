@@ -24,7 +24,7 @@ import {
 } from './messaging';
 import { moodEmoji } from './mood';
 import { ensureCharacterVoice, recordConversationImpact, refreshDailyMood } from './moodService';
-import { FOLLOWUP_DIRECTIVE, GOODNIGHT_DIRECTIVE } from './prompts';
+import { FOLLOWUP_DIRECTIVE, GOODNIGHT_DIRECTIVE, VACUO_DIRECTIVE } from './prompts';
 import { sendPush } from './push';
 import { generateSpeech } from './speech';
 import {
@@ -346,6 +346,14 @@ function trailingCharacterCount(messages: Message[]): number {
 
 const inProgress = new Set<string>();
 
+// Chance de COBRAR quando ficou no vácuo, por personalidade: carinhoso/extrovertido
+// reclama mais; formal/independente menos. ~10%..75% (é "às vezes", não sempre).
+function complaintChance(t: Record<string, number>): number {
+  const v = (k: string) => t[k] ?? 5;
+  const c = 0.4 + (v('carinho') - 5) * 0.04 + (v('extroversao') - 5) * 0.03 - (v('formalidade') - 5) * 0.02;
+  return Math.max(0.1, Math.min(0.75, c));
+}
+
 async function fireProactive(conversationId: string, now: Date): Promise<void> {
   const conversation = getConversation(conversationId);
   if (!conversation) return;
@@ -370,9 +378,23 @@ async function fireProactive(conversationId: string, now: Date): Promise<void> {
     intimacy: conversation.intimacy,
     userMemory: conversation.userMemory,
   };
-  const text = useNews
-    ? await generateNewsMessage(character, history, now, ctx)
-    : await generateProactiveMessage(character, history, now, { ...ctx, lastMessageAt: last?.createdAt });
+
+  // Deixado no vácuo (a última mensagem é dele, você não respondeu): às vezes ele
+  // cobra/reclama de leve, conforme a personalidade — em vez de puxar assunto novo.
+  const ghosted = last?.role === 'character';
+  const complain = ghosted && Math.random() < complaintChance(character.temperament ?? {});
+
+  let text: string;
+  if (complain) {
+    text = await generateReply(character, history, { ...ctx, directive: VACUO_DIRECTIVE });
+  } else if (useNews) {
+    text = await generateNewsMessage(character, history, now, ctx);
+  } else {
+    text = await generateProactiveMessage(character, history, now, {
+      ...ctx,
+      lastMessageAt: last?.createdAt,
+    });
+  }
   if (!text.trim()) return;
 
   // Entrega como uma ou várias mensagens, com "digitando..." (mesmo ritmo das respostas).

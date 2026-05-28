@@ -1,12 +1,14 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   Modal,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from 'react-native';
+import { setContactName, useContactNames } from '../contactNames';
 import { colors, radius } from '../theme';
 import { Character } from '../types';
 import { Avatar } from './Avatar';
@@ -89,7 +91,18 @@ export function CharacterProfileModal({
   onClose: () => void;
   onReset: () => void;
 }) {
+  const contactNames = useContactNames();
+  const [nick, setNick] = useState('');
+  // Sincroniza o campo com o apelido salvo ao abrir / trocar de personagem.
+  useEffect(() => {
+    setNick(character ? (contactNames[character.id] ?? '') : '');
+  }, [character?.id, visible, contactNames]);
+
   if (!character) return null;
+
+  const saveNick = () => {
+    void setContactName(character.id, nick);
+  };
 
   const photoLabel = regeneratingPhoto
     ? 'Gerando foto...'
@@ -115,6 +128,35 @@ export function CharacterProfileModal({
             {character.occupation}
             {character.location ? ` · ${character.location}` : ''}
           </Text>
+
+          {/* Apelido local: só você vê. O nome real (acima) nunca muda. */}
+          <View style={styles.nickBox}>
+            <Text style={styles.nickLabel}>Nome do contato (só você vê)</Text>
+            <View style={styles.nickRow}>
+              <TextInput
+                style={styles.nickInput}
+                value={nick}
+                onChangeText={setNick}
+                onBlur={saveNick}
+                onSubmitEditing={saveNick}
+                placeholder={`Apelido para ${character.name.split(' ')[0]} (opcional)`}
+                placeholderTextColor={colors.muted}
+                returnKeyType="done"
+                maxLength={40}
+              />
+              {nick.trim() ? (
+                <Pressable
+                  hitSlop={10}
+                  onPress={() => {
+                    setNick('');
+                    void setContactName(character.id, '');
+                  }}
+                >
+                  <Text style={styles.nickClear}>✕</Text>
+                </Pressable>
+              ) : null}
+            </View>
+          </View>
 
           {mood ? (
             <View style={styles.moodPill}>
@@ -204,6 +246,21 @@ const styles = StyleSheet.create({
   avatar: { marginTop: 8 },
   name: { fontSize: 24, fontWeight: '700', color: colors.text, marginTop: 14 },
   subtitle: { fontSize: 15, color: colors.muted, marginTop: 4, textAlign: 'center' },
+  nickBox: { alignSelf: 'stretch', marginTop: 18 },
+  nickLabel: { fontSize: 12, color: colors.muted, marginBottom: 6, marginLeft: 4 },
+  nickRow: { flexDirection: 'row', alignItems: 'center' },
+  nickInput: {
+    flex: 1,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    fontSize: 16,
+    color: colors.text,
+  },
+  nickClear: { fontSize: 16, color: colors.muted, fontWeight: '700', paddingHorizontal: 12 },
   moodPill: {
     marginTop: 12,
     backgroundColor: colors.accentSoft,
