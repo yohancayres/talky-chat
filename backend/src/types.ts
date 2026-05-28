@@ -66,6 +66,9 @@ export interface Character {
   age: number;
   occupation: string;
   location: string;
+  /** Fuso horário IANA do local do personagem (ex: "America/Sao_Paulo", "Asia/Tokyo").
+   *  Usado para a hora LOCAL dele (agenda, disponibilidade e contexto no prompt). */
+  timezone?: string;
   avatar: { emoji: string; color: string };
   /** Gênero do personagem ('female' | 'male'), usado p/ escolher a voz do TTS. */
   gender?: string;

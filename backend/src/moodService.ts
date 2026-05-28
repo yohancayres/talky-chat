@@ -1,4 +1,4 @@
-import { assessConversationImpact, inferGender } from './ai';
+import { assessConversationImpact, inferGender, inferTimezone } from './ai';
 import { config } from './config';
 import { DEFAULT_INTIMACY, applyIntimacyDelta } from './intimacy';
 import { DEFAULT_SPLIT_STYLE } from './messaging';
@@ -78,7 +78,17 @@ export async function recordConversationImpact(
   const impact = await assessConversationImpact(character, history, level, conversation.userMemory);
 
   // Personagem (global): humor + estilo de picotar. Relê e salva uma vez só.
-  const freshChar = getCharacter(character.id) ?? character;
+  let freshChar = getCharacter(character.id) ?? character;
+
+  // Personagens antigos sem fuso: infere uma vez (best-effort) e guarda.
+  if (!freshChar.timezone) {
+    const tz = await inferTimezone(freshChar);
+    if (tz) {
+      freshChar = { ...freshChar, timezone: tz };
+      saveCharacter(freshChar);
+    }
+  }
+
   let updatedChar = freshChar;
   let charChanged = false;
 

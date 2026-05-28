@@ -4,6 +4,44 @@ import { Character, Responsiveness, ScheduleBlock } from './types';
 
 export type StatusState = 'online' | 'busy' | 'sleeping';
 
+/** Hora (0-23) no fuso do personagem; sem fuso, cai na hora do servidor. */
+export function localHour(now: Date, timezone?: string): number {
+  if (!timezone) return now.getHours();
+  try {
+    const h = new Intl.DateTimeFormat('en-US', {
+      timeZone: timezone,
+      hour: 'numeric',
+      hour12: false,
+    }).format(now);
+    const n = parseInt(h, 10);
+    return Number.isFinite(n) ? n % 24 : now.getHours();
+  } catch {
+    return now.getHours();
+  }
+}
+
+/** Data + hora local do personagem, em pt-BR (para contexto no prompt). */
+export function localDateTimeStr(now: Date, timezone?: string): string {
+  try {
+    return new Intl.DateTimeFormat('pt-BR', {
+      timeZone: timezone,
+      weekday: 'long',
+      day: '2-digit',
+      month: 'long',
+      hour: '2-digit',
+      minute: '2-digit',
+    }).format(now);
+  } catch {
+    return new Intl.DateTimeFormat('pt-BR', {
+      weekday: 'long',
+      day: '2-digit',
+      month: 'long',
+      hour: '2-digit',
+      minute: '2-digit',
+    }).format(now);
+  }
+}
+
 // Janela de "boas-vindas" após criar a conversa: responde rápido e fica sempre
 // disponível (nunca dormindo). Depois disso, normaliza para o comportamento normal.
 export const FRESH_CONVERSATION_MS = 10 * 60_000;
@@ -63,9 +101,9 @@ function stateOf(responsiveness: Responsiveness): StatusState {
   return 'busy';
 }
 
-/** O que o personagem está fazendo agora. */
+/** O que o personagem está fazendo agora (na HORA LOCAL dele). */
 export function currentPresence(character: Character, now: Date): Presence {
-  const block = currentBlock(scheduleOf(character), now.getHours());
+  const block = currentBlock(scheduleOf(character), localHour(now, character.timezone));
   return {
     activity: block.activity,
     responsiveness: block.responsiveness,
@@ -77,18 +115,16 @@ function randomInt(min: number, max: number): number {
   return Math.floor(min + Math.random() * (max - min + 1));
 }
 
-/** Próximo horário em que o personagem não está mais dormindo. */
-function nextWake(schedule: ScheduleBlock[], now: Date): Date {
+/** Próximo horário em que o personagem não está mais dormindo (hora local dele). */
+function nextWake(schedule: ScheduleBlock[], now: Date, timezone?: string): Date {
   for (let i = 1; i <= 24; i++) {
-    const candidate = new Date(now);
-    candidate.setHours(now.getHours() + i, randomInt(0, 20), 0, 0);
-    if (currentBlock(schedule, candidate.getHours()).responsiveness !== 'asleep') {
+    const candidate = new Date(now.getTime() + i * 3_600_000);
+    if (currentBlock(schedule, localHour(candidate, timezone)).responsiveness !== 'asleep') {
+      candidate.setMinutes(randomInt(0, 20), 0, 0);
       return candidate;
     }
   }
-  const fallback = new Date(now);
-  fallback.setHours(now.getHours() + 8);
-  return fallback;
+  return new Date(now.getTime() + 8 * 3_600_000);
 }
 
 function isUserActiveHour(activity: number[] | undefined, hour: number): boolean {
@@ -144,10 +180,10 @@ export function computeReplyDueAt(
   }
 
   const schedule = scheduleOf(character);
-  const block = currentBlock(schedule, now.getHours());
+  const block = currentBlock(schedule, localHour(now, character.timezone));
 
   if (block.responsiveness === 'asleep') {
-    return { dueAt: nextWake(schedule, now), sleeping: true };
+    return { dueAt: nextWake(schedule, now, character.timezone), sleeping: true };
   }
 
   // Menos intimidade => demora mais pra começar a responder.

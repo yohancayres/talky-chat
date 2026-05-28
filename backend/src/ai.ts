@@ -11,7 +11,7 @@ import {
   buildProactiveDirective,
   describeTemperament,
 } from './prompts';
-import { currentPresence, defaultSchedule } from './availability';
+import { currentPresence, defaultSchedule, localDateTimeStr } from './availability';
 import { MoodShift, rollDailyMood } from './mood';
 import { Character, Message, Responsiveness, ScheduleBlock } from './types';
 
@@ -131,6 +131,7 @@ export async function generateCharacter(
     gender: normalizeGender(data.gender),
     occupation: String(data.occupation ?? ''),
     location: String(data.location ?? ''),
+    timezone: validTimezone(data.timezone) ? String(data.timezone) : undefined,
     avatar: {
       emoji: String(data.avatarEmoji ?? '🙂'),
       color: String(data.avatarColor ?? '#E07A5F'),
@@ -157,6 +158,17 @@ export async function generateCharacter(
 
 function clamp(n: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, n));
+}
+
+// Valida um fuso IANA (ex: "America/Sao_Paulo"). Node 20 tem ICU completo.
+function validTimezone(tz: unknown): boolean {
+  if (typeof tz !== 'string' || !tz.trim()) return false;
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: tz });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 // Corta um texto no limite, preferindo uma fronteira limpa (fim de frase/palavra)
@@ -204,6 +216,31 @@ export async function inferGender(character: Character): Promise<string> {
     return normalizeGender(extractText(resp.content));
   } catch (err) {
     console.warn('[talky] não foi possível inferir o gênero:', err);
+    return '';
+  }
+}
+
+/**
+ * Infere o fuso horário IANA do local do personagem (para personagens antigos,
+ * criados antes do campo `timezone`). Chamada leve; '' se incerto.
+ */
+export async function inferTimezone(character: Character): Promise<string> {
+  if (!character.location?.trim()) return '';
+  try {
+    const resp = await anthropic.messages.create(
+      {
+        model: config.fastModel,
+        max_tokens: 20,
+        system:
+          'Responda APENAS com o fuso horário IANA do local informado, ex: "America/Sao_Paulo". Nada além disso.',
+        messages: [{ role: 'user', content: `Local: ${character.location}. Fuso IANA?` }],
+      },
+      { timeout: 15_000, maxRetries: 1 },
+    );
+    const tz = extractText(resp.content).trim().replace(/["'`.]/g, '');
+    return validTimezone(tz) ? tz : '';
+  } catch (err) {
+    console.warn('[talky] não foi possível inferir o fuso horário:', err);
     return '';
   }
 }
@@ -363,11 +400,12 @@ async function runChat(
   history: Message[],
   ctx: ChatContext = {},
 ): Promise<string> {
-  const presence = currentPresence(character, new Date());
+  const now = new Date();
+  const presence = currentPresence(character, now);
   const system = buildChatSystemPrompt(
     character,
     ctx.userName,
-    todayStr(),
+    localDateTimeStr(now, character.timezone),
     presence,
     ctx.userStatus,
     ctx.intimacy,

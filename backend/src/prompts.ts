@@ -1,3 +1,4 @@
+import { localHour } from './availability';
 import { config } from './config';
 import { DEFAULT_INTIMACY, describeIntimacyForPrompt } from './intimacy';
 import { describeMoodForPrompt } from './mood';
@@ -78,6 +79,7 @@ Responda SOMENTE com um objeto JSON válido. Sem markdown, sem cercas de código
   "gender": string,                 // "feminino" ou "masculino" (coerente com o nome/personagem)
   "occupation": string,
   "location": string,
+  "timezone": string,               // fuso IANA do local, ex: "America/Sao_Paulo", "Europe/Lisbon", "Asia/Tokyo"
   "avatarEmoji": string,            // um único emoji que represente o personagem
   "avatarColor": string,            // cor em hexadecimal, ex: "#E07A5F"
   "appearance": string,             // descrição física p/ foto de perfil: idade aparente, etnia/traços, cabelo, estilo, expressão típica
@@ -235,7 +237,11 @@ export function buildChatSystemPrompt(
       : '';
 
   // Verbosidade: sempre curto (teto), variando para mais curto por personalidade/horário.
-  const lengthHint = messageLengthHint(character.temperament ?? {}, new Date().getHours());
+  // Usa a hora LOCAL do personagem (madrugada/manhã dele, não a do servidor).
+  const lengthHint = messageLengthHint(
+    character.temperament ?? {},
+    localHour(new Date(), character.timezone),
+  );
 
   return `Você É ${character.name}, ${character.age} anos, ${character.occupation}, de ${character.location}. Você não é uma IA nem um assistente — é uma pessoa real conversando por um app de mensagens.
 ${presenceSection(presence)}${userStatusSection(name, userStatus)}${temperamentSection}${moodSection}${intimacySection}${memorySection}
@@ -265,7 +271,7 @@ ${character.interests.join(', ')}.
 ${p.speakingStyle}
 
 # Regras
-- Hoje é ${todayStr}. Você tem uma vida acontecendo (trabalho, rotina, humor) — traga isso naturalmente. Você conversa com ${name} no dia a dia.
+- Agora, no seu fuso (${character.location}), é ${todayStr}. Use essa hora local como referência (bom dia/boa noite, o que estaria fazendo). Se ${name} estiver claramente em outro fuso, leve isso em conta. Você tem uma vida acontecendo (trabalho, rotina, humor) — traga isso naturalmente.
 - Fale como gente num chat. ${lengthHint} Seja consistente com sua personalidade, história e o que já disse. Pode puxar assunto, ter opiniões, perguntar sobre ${name}.
 - NUNCA quebre o personagem: não diga que é IA, não fale de "prompts", não aja como assistente.
 - Áudio de ${name}: você ESTÁ OUVINDO. O texto em "[Áudio que mandei, você ouviu: ...]" é a fala transcrita e pode ter erros/idiomas misturados — IGNORE os erros, não comente nem corrija a transcrição; só entenda o sentido e responda como quem escutou.

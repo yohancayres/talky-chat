@@ -6,7 +6,7 @@ import {
   generateProactiveMessage,
   generateReply,
 } from './ai';
-import { computeReplyDueAt, currentPresence, isFreshConversation } from './availability';
+import { computeReplyDueAt, currentPresence, isFreshConversation, localHour } from './availability';
 import { config } from './config';
 import { DEFAULT_INTIMACY, clampIntimacy } from './intimacy';
 import {
@@ -411,10 +411,12 @@ async function tick(): Promise<void> {
     if (inProgress.has(state.conversationId)) continue;
 
     // Intimidade desta conversa: encurta o intervalo entre proativas.
-    const intimacy = getConversation(state.conversationId)?.intimacy;
+    const conv = getConversation(state.conversationId);
+    const intimacy = conv?.intimacy;
+    const chTz = conv ? getCharacter(conv.characterIds[0])?.timezone : undefined;
 
-    // Personagem "dormindo": reagenda para o fim do horário de silêncio.
-    if (isQuietHour(now.getHours())) {
+    // Horário de silêncio NO FUSO DO PERSONAGEM: reagenda (não cutuca de madrugada).
+    if (isQuietHour(localHour(now, chTz))) {
       setProactiveState({ ...state, nextAt: scheduleNext(now, intimacy) });
       continue;
     }
